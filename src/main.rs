@@ -73,7 +73,7 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    let mut result: Option<SocketAddr> = None;
+    let result: Option<SocketAddr> = None;
     let result = get_server_address_info(argc, &argv, debug);
     if result == Err(0) {
         return Err(io::Error::new(io::ErrorKind::Other, "Error getting server address info"));
@@ -161,9 +161,9 @@ fn accept_clients(s: &TcpStream, debug: bool) -> i32 {
     }
 
     let mut success = true;
-    let mut authroisedLogin = false;
+    let authroisedLogin = false;
     //let mut sDataActive: TcpStream = "";
-    let mut clientId = 1;
+    let clientId = 1;
     let mut currentDirectory = String::new();
     let mut nameFileForRename = String::new();
 
@@ -188,7 +188,7 @@ fn accept_new_client(s: &TcpStream) {
 }
 
 // Receive and handle messages from client, returns false if client ends connection.
-fn communicate_with_client(mut s: &TcpStream, /*sDataActive: &TcpStream,*/ mut authroisedLogin: bool, debug: bool, clientId: &u64, currentDirectory: &mut str, nameFileForRename: &mut str) -> bool
+fn communicate_with_client(s: &TcpStream, /*sDataActive: &TcpStream,*/ authroisedLogin: bool, debug: bool, clientId: &u64, currentDirectory: &mut str, nameFileForRename: &mut str) -> bool
 {
     let mut receiveBuffer = Vec::new();
     let mut userName = Vec::new();
@@ -350,7 +350,7 @@ fn receiveMessage(mut s: &TcpStream, receiveBuffer: &mut Vec<u8>, debug: bool) -
 }
 
 // Client sent USER command, returns false if fails.
-fn command_user_name(mut s: &TcpStream, receiveBuffer: &mut Vec<u8>, userName: &mut Vec<u8>, mut authroisedLogin: bool, debug: bool) -> bool
+fn command_user_name(s: &TcpStream, receiveBuffer: &mut Vec<u8>, userName: &mut Vec<u8>, mut authroisedLogin: bool, debug: bool) -> bool
 {
     remove_command(receiveBuffer, userName, 4);
 
@@ -1385,7 +1385,7 @@ fn commandRenameTo(s: &TcpStream, receiveBuffer: &str, nameFileForRename: &str, 
 }
 */
 // Client sent unknown command, returns false if fails.
-fn command_unknown(mut s: &TcpStream, debug: bool) -> bool {
+fn command_unknown(s: &TcpStream, debug: bool) -> bool {
     return send_message(s, "550 unrecognised command.\r\n", debug);
 }
 
