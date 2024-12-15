@@ -19,441 +19,185 @@
 //STOR is also a few steps away, use your implementation of RETR and invert it to save the file on the server's dir
 //=======================================================================================================================
 
-//#include "server.h"
 use std::env;
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::str::FromStr;
+use std::net::{TcpListener, TcpStream, SocketAddr, ToSocketAddrs};
+//use std::str::FromStr;
 use std::io::{self, Write};
+//use std::ptr;
 
-static g_sMonths: &str = [
-	"Jan",
-	"Feb",
-	"Mar",
-	"Apr",
-	"May",
-	"Jun",
-	"Jul",
-	"Aug",
-	"Sep",
-	"Oct",
-	"Nov",
-	"Dec"
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 ];
 
-const systemCommandDEL: &str = "del";
-const systemCommandMKDIR: &str = "mkdir";
-const systemCommandRMDIR: &str = "rmdir";
-const systemCommandRENAME: &str = "rename";
+const SYSTEM_COMMAND_DEL: &str = "del";
+const SYSTEM_COMMAND_MKDIR: &str = "mkdir";
+const SYSTEM_COMMAND_RMDIR: &str = "rmdir";
+const SYSTEM_COMMAND_RENAME: &str = "rename";
 
-static g_convertKirillica: bool = false;
+static mut CONVERT_KIRILLICA: bool = false;
 
-const WSVERS: i16 = 2 * 256 + 2;
 const DEFAULT_PORT: &str = "21";
-const USE_IPV6: bool = true;
-const BUFFER_SIZE: i32 = 200;
-const FILENAME_SIZE: i32 = 1024;
-const BIG_BUFFER_SIZE: i32 = 65535;
+const BUFFER_SIZE: usize = 1024;
+const FILENAME_SIZE: usize = 1024;
+const BIG_BUFFER_SIZE: usize = 65535;
+
 
 // Arguments:
 //      0:  Program name
 //      1:  Port number
 //      2:  Debug mode (true/false)
 //      3:  Use convert kirillica file and directory name between Android and Windows 7 (true/false)
-fn main() {
-    let agrs: Vec<String> = env::args().collect();
+fn main() -> std::io::Result<()> {
+    let argc = std::env::args().len();
+    let argv: Vec<String> = std::env::args().collect();
 
-    let debug = debugMode(argc, argv);                                             // Debug mode off by default.
+    let debug = debug_mode(argc, &argv);
 
-    g_convertKirillica = useConvertKirillica(argc, argv);                           // Off by default.
+    unsafe { CONVERT_KIRILLICA = convert_kirillica(argc, &argv); }
 
-	if (NULL == getenv("TEMP"))                                                     // in Windows environment string <TEMP> MUST HAVE!!
-	{
-		if (debug)
-		{
-			std::cout << "Error, not find environment <TEMP>!!" << std::endl;
-		}
-		return 1;
-	}
-	else
-	{
-		if (strlen(getenv("TEMP")) > FILENAME_SIZE - 50)
-		{
-			if (debug)
-			{
-				std::cout << "Error, very long size for environment <TEMP>!!" << std::endl;
-			}
-			return 1;
-		}
-	}
-
-    let error = startWinsock(debug);                                                // Start winsock.
-    if (error)                                                                      // Check if error occurred.
-    {
-        return error;                                                               // Exit with error code.
+    if env::var("TEMP").is_err() {
+        if debug {
+            writeln!(io::stdout(), "Error, not find environment <TEMP>!!")?;
+        }
+        return Err(io::Error::new(io::ErrorKind::Other, "TEMP not found"));
+    } else {
+        if let Ok(temp) = env::var("TEMP") {
+            if temp.len() > 50 {
+                if debug {
+                    writeln!(io::stdout(), "Error, very long size for environment <TEMP>!!")?;
+                }
+                return Err(io::Error::new(io::ErrorKind::Other, "TEMP too long"));
+            }
+        }
     }
 
-    let mut result: *mut addrinfo = NULL;                                                 // Structure for server's address information.
-
-    error = getServerAddressInfo(result, argc, argv, debug);                        // Get server's address information.
-    if (error)                                                                      // Check if error occurred.
-    {
-        return error;                                                               // Exit with error code.
+    let mut result: Option<SocketAddr> = None;
+    let result = get_server_address_info(argc, &argv, debug);
+    if result == Err(0) {
+        return Err(io::Error::new(io::ErrorKind::Other, "Error getting server address info"));
     }
 
-    let s: TcpStream = INVALID_SOCKET;                                                      // Socket for listening.
+    let listener = TcpListener::bind(result.unwrap()).unwrap();
 
-    error = allocateServerSocket(s, result, debug);                                 // Allocate server socket.
-    if (error)                                                                      // Check if error occurred.
-    {
-        return error;                                                               // Exit with error code.
-    }
+    show_server_info();
 
-    error = bindServerSocket(s, result, debug);                                     // Bind the server socket
-    if (error)                                                                      // Check if error occurred.
-    {
-        return error;                                                               // Exit with error code.
-    }
-
-    freeaddrinfo(result);                                                           // Free memory.
-
-    let mut serverHost: [u8; NI_MAXHOST];                                                    // The server's IP number.
-    let mut serverService: [u8; NI_MAXSERV];                                                 // The server's port number.
-
-    error = getServerNameInfo(s, serverHost, serverService, debug);                 // Get the server name information.
-    if (error)                                                                      // Check if error occurred.
-    {
-        return error;                                                               // Exit with error code.
-    }
-
-    error = serverListen(s, debug);                                                 // Listen for client connections and deal with them accordingly.
-    if (error)                                                                      // Check if error occurred.
-    {
-        return error;                                                               // Exit with error code.
-    }
-
-    return 0;                                                                       // Program completed without error.
+    server_listen(&listener, debug)
 }
 
 // Returns true if user indicated that debug mode should be on.
-fn debugMode(argc: i32, argv: &str) -> bool {
-    if (argc > 2)                                                                   // Check if there are more than 2 arguments.
-    {
-        if (strcmp(argv[2], "true") == 0)                                           // Check if argument 3 is debug command.
-        {
-            return true;                                                            // Set debug mode on.
+fn debug_mode(argc: usize, argv: &[String]) -> bool {
+    if argc > 2 {
+        if argv[2] == "true" {
+            return true;
         }
     }
 
-    return false;                                                                   // Set debug mode off.
+    false
 }
 
 // Returns true if user indicated that convert kirillica should be on.
-fn useConvertKirillica(argc: i32, argv: &str) -> bool {
-    if (argc > 3)                                                                   // Check if there are more than 3 arguments.
-    {
-        if (strcmp(argv[3], "true") == 0)                                           // Check if argument 4 is convert kirillica command.
-        {
-            return true;                                                            // Set convert kirillica on.
+fn convert_kirillica(argc: usize, argv: &[String]) -> bool {
+    if argc > 3 {
+        if argv[3] == "true" {
+            return true;
         }
     }
 
-    return false;                                                                   // Set convert kirillica off.
+    false
 }
 
-// Starts WSA.
-fn startWinsock(debug: bool) -> i32 {
-    let wsadata: WSADATA = NULL;
-    let err = WSAStartup(WSVERS, &wsadata);                                         // Initialise use of winsock dll and save error code.
-
-    if (err != 0)                                                                   // Check if there was an error starting winsock.
-    {
-        std::cout << "WSAStartup failed with error: " << err << std::endl;          // Tell the user that we could not fInd a usable WinsockDLL.
-        WSACleanup();                                                               // Clean up winsock.
-
-        return 1;                                                                   // Return error code.
-    }
-    else if (LOBYTE(wsadata.wVersion) != 2 || HIBYTE(wsadata.wVersion) != 2)        // Ensure the use of winsock 2.2 is supported.
-    {
-        std::cout << "Could not fInd a usable version of Winsock.dll" << std::endl;;
-        WSACleanup();                                                               // Clean up winsock.
-
-        return 2;                                                                   // Return error code.
-    }
-    else
-    {
-        std::cout << std::endl << "===============================" << std::endl;
-        std::cout <<              "     159.334 FTP Server        ";
-        std::cout << std::endl << "===============================" << std::endl;
-    }
-
-    if (debug)                                                                      // Check if debug info should be displayed.
-    {
-        std::cout << "<<<DEBUG INFO>>>: Winsock started." << std::endl;
-    }
-
-    return 0;                                                                       // Completed without error.
+fn show_server_info() {
+    println!("===============================");
+    println!("     159.334 FTP Server        ");
+    println!("===============================");
 }
 
 // Gets the servers address information based on arguments.
-fn getServerAddressInfo(result: &addrinfo, argc: i32, argv: &str, debug: bool) -> i32
-{
-    let hints: addrinfo;                                                            // Create address info hint structure.
-    memset(&hints, 0, sizeof(addrinfo));                                            // Clean up the structure.
+fn get_server_address_info(argc: usize, argv: &[String], debug: bool) -> Result<SocketAddr, i32> {
+    let addr = if argc > 1 {
+        format!("0.0.0.0:{}", argv[1])
+    } else {
+        format!("0.0.0.0:{}", DEFAULT_PORT)
+    };
 
-    hints.ai_family = AF_INET;                                                      // Set address family as internet (IPv4).
-    hints.ai_socktype = SOCK_STREAM;                                                // Set socket type as socket stream (for TCP).
-    hints.ai_protocol = IPPROTO_TCP;                                                // Set protocol as TCP.
-    hints.ai_flags = AI_PASSIVE;                                                    // Set flags as passive.
+    let socket_addr = addr.to_socket_addrs()
+        .map_err(|_| 3)?
+        .next()
+        .ok_or(3)?;
 
-    let iResult = 0;                                                                // Create return value.
-    if (argc > 1)
-    {
-        iResult = getaddrinfo(NULL, argv[1], &hints, &result);                      // Resolve local address and port to be used by the server.
-    }
-    else
-    {
-        iResult = getaddrinfo(NULL, DEFAULT_PORT, &hints, &result);                 // Resolve local address and port to be used by the server.
+    if debug {
+        println!("<<<DEBUG INFO>>>: Server address information created.");
     }
 
-    if (iResult != 0)                                                               // Check for expected execution of getaddrinfo.
-    {
-        std::cout << "getaddrinfo() failed: " << iResult << std::endl;
-        WSACleanup();                                                               // Clean up winsock.
-
-        return 3;                                                                   // Return error code.
-    }
-
-    if (debug)                                                                      // Check if debug info should be displayed.
-    {
-        std::cout << "<<<DEBUG INFO>>>: Server address information created." << std::endl;
-    }
-
-    return 0;                                                                       // Completed without error.
-}
-
-// Allocates the server's socket.
-fn allocateServerSocket(s: &TcpStream, result: &addrinfo, debug: bool) -> i32
-{
-    s = socket(result.ai_family, result.ai_socktype, result.ai_protocol);           // Allocate socket.
-
-    if (s == INVALID_SOCKET)                                                        // Check for error in socket allocation.
-    {
-        std::cout << "Error at socket(): " << WSAGetLastError() << std::endl;
-        freeaddrinfo(result);                                                       // Free memory.
-        WSACleanup();                                                               // Clean up winsock.
-
-        return 4;                                                                   // Return error code.
-    }
-
-    if (debug)                                                                      // Check if debug info should be displayed.
-    {
-        std::cout << "<<<DEBUG INFO>>>: Server socket allocated." << std::endl;
-    }
-
-    return 0;                                                                       // Completed without error.
-}
-
-// Bind server socket to result address.
-fn bindServerSocket(s: &TcpStream, result: &addrinfo , debug: bool) -> i32
-{
-    let iResult = bind(s, result.ai_addr, result.ai_addrlen);               // Bind the listening socket to the server's IP address and port number.
-
-    if (iResult == SOCKET_ERROR)                                                    // Check if error occurred in socket binding.
-    {
-        std::cout << "Bind failed with error: " << WSAGetLastError() << std::endl;
-        freeaddrinfo(result);                                                       // Free memory.
-        closesocket(s);                                                             // Close socket.
-        WSACleanup();                                                               // Clean up winsock.
-
-        return 5;                                                                   // Return error code.
-    }
-
-    if (debug)                                                                      // Check if debug info should be displayed.
-    {
-        std::cout << "<<<DEBUG INFO>>>: Server socket bound." << std::endl;
-    }
-
-    return 0;                                                                       // Completed without error.
-}
-
-// Gets the host and service information for the server.
-fn getServerNameInfo(s: &TcpStream, serverHost: &str, serverService: &str, debug: bool) -> i32
-{
-    let serverAddress: sockaddr_storage;                                          // The server's address information.
-
-    let addressLength = sizeof(serverAddress);                                      // Get the size of the client address sockaddr structure.
-
-    let returnValue = getsockname(s, &serverAddress, &addressLength);   // Get socket information.
-    if(returnValue != 0)                                                            // Check that sock name obtained as expected.
-    {
-        std::cout << "getsockname() failed: " << returnValue;
-
-        return 6;                                                                   // Return error code.
-    }
-
-    returnValue = getnameinfo(&serverAddress, addressLength,    // Get name info for server.
-                              &serverHost, NI_MAXHOST,
-                              &serverService, NI_MAXSERV,
-                              NI_NUMERICHOST);
-
-    if(returnValue != 0)                                                            // Check that name info obtained as expected.
-    {
-        std::cout << "getnameinfo() failed: " << returnValue;
-
-        return 7;                                                                   // Return error code.
-    }
-    else
-    {
-        std::cout << "Sever intialised at Port: " << serverService << std::endl;
-    }
-
-    if (debug)                                                                      // Check if debug info should be displayed.
-    {
-        std::cout << "<<<DEBUG INFO>>>: Server name information collected." << std::endl;
-    }
-
-    return 0;                                                                       // Completed without error.
+    Ok(socket_addr)
 }
 
 // Listen for client communication and deal with it accordingly.
-fn serverListen(s: &TcpStream, debug: bool) -> i32
-{
-    let error = startListen(s, debug);                                              // Start server listening for incoming connections.
-    if (error)                                                                      // Check if error occurred.
-    {
-        return error;                                                               // Exit with error code.
+fn server_listen(listener: &TcpListener, debug: bool) -> std::io::Result<()> {
+    for stream in listener.incoming() {
+        match stream {
+            Ok(s) => {
+                accept_clients(&s, debug);
+            },
+            Err(_e) => panic!("Error listening for connections"),
+        }
     }
 
-    while (!error)                                                                  // Start main listening loop which continues infInitely while server runs.
-    {
-        error = acceptClients(s, debug);                                            // Accept clients and deal with commands.
-    }
+    println!("SERVER SHUTTING DOWN...");
 
-    closesocket(s);                                                                 // Close listening socket.
-    std::cout << "SERVER SHUTTING DOWN..." << std::endl;
-
-    return error;                                                                   // Return error code.
-}
-
-// Starts server listening for incoming connections.
-fn startListen(s: &TcpStream, debug: bool) -> i32
-{
-    if (listen(s, SOMAXCONN) == SOCKET_ERROR)                                       // Start listening to socket s and check if error.
-    {
-        std::cout << "Listen failed with error: " << WSAGetLastError() << std::endl;
-        closesocket(s);                                                             // Close socket.
-        WSACleanup();                                                               // Clean up winsock.
-
-        return 8;                                                                   // Exit with error code.
-    }
-
-    if (debug)                                                                      // Check if debug info should be displayed.
-    {
-        std::cout << "<<<DEBUG INFO>>>: Server started listening." << std::endl;
-    }
-
-    return 0;                                                                       // Completed without error.
+    Ok(())
 }
 
 // Accepts new clients and deals with commands.
-fn acceptClients(s: &TcpStream, debug: bool) -> i32
-{
-    let clientAddress: sockaddr_storage;                                          // The client's address information.
-    let clientHost: [u8; NI_MAXHOST];                                                    // The client's IP number.
-    let clientService: [u8; NI_MAXSERV];                                                 // The client's port number.
+fn accept_clients(s: &TcpStream, debug: bool) -> i32 {
+    //let mut clientHost: &str = "";
+    //let mut clientService: &str = "";
 
-    memset(clientHost, 0, sizeof(clientHost));                                      // Ensure blank.
-    memset(clientService, 0, sizeof(clientService));                                // Ensure blank.
+    //accept_new_client(&s, &clientHost, &clientService);
 
-    let ns: SOCKET = INVALID_SOCKET;                                                     // New socket for new client.
-
-    let error = acceptNewClient(ns, s, clientAddress, clientHost, clientService, debug);    // Takes incoming connection and assigns new socket.
-    if (error)                                                                      // Check if error occurred.
-    {
-        return error;                                                               // Exit with error code.
+    let sendBuffer: &str = "220 FTP Server ready.\r\n\0";
+    if !send_message(&s, sendBuffer, debug) {
+        close_client_connection(s, debug);
+        return 0;
     }
 
-    let sendBuffer: [u8; BUFFER_SIZE];                                                   // Set up send buffer.
-    memset(&sendBuffer, 0, BUFFER_SIZE);                                            // Ensure blank.
+    let mut success = true;
+/*    let mut authroisedLogin = false;                                                   // Flag for if user logging in is authorised or not.
 
-    sprintf(sendBuffer,"220 FTP Server ready.\r\n");                                // Add accept message for client to send buffer.
-    let bytes = send(ns, sendBuffer, strlen(sendBuffer), 0);                        // Send accept message to client.
+    let mut sDataActive: TcpStream;                                            // Socket for data transfer.
 
-    if (debug)                                                                      // Check if debug on.
-    {
-        std::cout << "---> " << sendBuffer;
+    let mut clientId = 1;                                                     // For check send <Directory> or <FILE DATA>.
+
+    let mut currentDirectory = String::new();//: [u8; FILENAME_SIZE];                                           // For store currect directory.
+    //memset(&currentDirectory, 0, FILENAME_SIZE);                                    // Ensure blank.
+
+    let mut nameFileForRename = String::new();//: [u8; FILENAME_SIZE];                                          // For store currect directory.
+    //memset(&nameFileForRename, 0, FILENAME_SIZE);                                   // Ensure blank.
+*/
+    while success {
+        //success = communicateWithClient(s, sDataActive, authroisedLogin, debug, clientId, currentDirectory, nameFileForRename);   // Receive and handle messages from client.
+        success = false;
     }
 
-    if ((bytes == SOCKET_ERROR) || (bytes == 0))                                    // If send failed client has disconnected.
-    {
-        closeClientConnection(ns, debug);                                           // Close client connection.
+    close_client_connection(s, debug);                                               // Close client connection.
 
-        return 0;                                                                   // Connection ended, leave function.
-    }
-
-    let success = true;                                                            // The status of the connection with the client.
-    let authroisedLogin = false;                                                   // Flag for if user logging in is authorised or not.
-
-    let sDataActive: TcpStream = INVALID_SOCKET;                                            // Socket for data transfer.
-
-	let clientId = 1;                                                     // For check send <Directory> or <FILE DATA>.
-
-	let currentDirectory: [u8; FILENAME_SIZE];                                           // For store currect directory.
-    memset(&currentDirectory, 0, FILENAME_SIZE);                                    // Ensure blank.
-
-	let nameFileForRename: [u8; FILENAME_SIZE];                                          // For store currect directory.
-    memset(&nameFileForRename, 0, FILENAME_SIZE);                                   // Ensure blank.
-
-    while (success)
-    {
-        success = communicateWithClient(ns, sDataActive, authroisedLogin, debug, clientId, currentDirectory, nameFileForRename);   // Receive and handle messages from client.
-    }
-
-    closeClientConnection(ns, debug);                                               // Close client connection.
-
-    return 0;                                                                       // Completed without error.
+    0
 }
-
+/*
 // Takes incoming connection and assigns new socket.
-fn acceptNewClient(ns: &TcpStream, s: &TcpStream, clientAddress: &sockaddr_storage, clientHost: &str, clientService: &str, debug: bool) -> i32
-{
-    let addressLength = sizeof(clientAddress);                                      // Get the size of the client address sockaddr structure.
+fn accept_new_client(s: &TcpStream, mut clientHost: &str, clientService: &str) -> i32 {
+    println!("A client has been accepted.");
+    
+    clientHost = &s.peer_addr().unwrap().ip().to_string();
 
-    ns = accept(&s, &clientAddress, &addressLength);   // Accept a new client on new socket.
+    print!("Connected to client with IP address: {}", clientHost);
+    println!(", at Port: {}", clientService);
 
-    if (ns == INVALID_SOCKET)                                                       // Check if client not accepted as expected.
-    {
-        std::cout << "Accept failed: " << WSAGetLastError() << std::endl;
-        closesocket(s);                                                             // Close socket.
-        WSACleanup();                                                               // Clean up winsock.
-
-        return 9;                                                                   // Exit with error code.
-    }
-    else
-    {
-        std::cout << std::endl << "A client has been accepted." << std::endl;
-
-        let returnValue = getnameinfo(&clientAddress, &addressLength,   // Get name info for client.
-                                  clientHost, NI_MAXHOST,
-                                  clientService, NI_MAXSERV,
-                                  NI_NUMERICHOST);
-
-        if (returnValue != 0)                                                       // Check that name info obtained as expected.
-        {
-            std::cout << "getnameinfo() failed: " << returnValue;
-
-            return 10;                                                              // Exit with error code.
-        }
-        else
-        {
-            std::cout << "Connected to client with IP address: " << clientHost;
-            std::cout << ", at Port: " << clientService << std::endl;
-        }
-    }
-
-    return 0;                                                                       // Completed without error.
+    0
 }
-
+*/
+/*
 // Receive and handle messages from client, returns false if client ends connection.
 fn communicateWithClient(ns: &TcpStream, sDataActive: &TcpStream, authroisedLogin: &bool, debug: bool, clientId: &u64, currentDirectory: &str, nameFileForRename: &str) -> bool
 {
@@ -656,10 +400,10 @@ fn commandUserName(ns: &TcpStream, receiveBuffer: &str, userName: &str, authrois
         return send_message(ns, "331 Public login requested, please specify email as password.\r\n", debug);
     }
 }
-
+*/
 // Send message to client, returns true if message was sended.
-fn send_message(ns: &TcpStream, send_buffer: &str, debug: bool) -> bool {
-    match ns.write(send_buffer.as_bytes()) {
+fn send_message(mut s: &TcpStream, send_buffer: &str, debug: bool) -> bool {
+    match s.write(send_buffer.as_bytes()) {
         Ok(bytes) => {
             if debug {
                 println!("---> {}", send_buffer);
@@ -669,19 +413,17 @@ fn send_message(ns: &TcpStream, send_buffer: &str, debug: bool) -> bool {
         Err(_) => false,
     }
 }
-
+/*
 // Returns true if valid user name.
-fn isValidUserName(userName: &str) -> bool
-{
-    return !strcmp(userName, "nhreyes");                                            // Only valid user name is nhreyes, for testing purposes.
+fn is_valid_user_name(userName: &str) -> bool {
+    userName == "nhreyes"
 }
 
 // Client sent PASS command, returns false if fails.
-fn commandPassword(ns: &TcpStream, receiveBuffer: &str, password: &str, authroisedLogin: bool, debug: bool) -> bool
-{
-    removeCommand(receiveBuffer, password);                                         // Get the inputted password.
+fn commandPassword(ns: &TcpStream, receiveBuffer: &str, password: &str, authroisedLogin: bool, debug: bool) -> bool {
+    removeCommand(receiveBuffer, password);
 
-    let validPassword = isValidPassword(password, authroisedLogin);                // Check if password is email address.
+    let validPassword = isValidPassword(password, authroisedLogin);
 
     let sendBuffer: [u8; BUFFER_SIZE];                                                   // Set up send buffer.
     memset(&sendBuffer, 0, BUFFER_SIZE);                                            // Ensure blank.
@@ -715,40 +457,36 @@ fn commandPassword(ns: &TcpStream, receiveBuffer: &str, password: &str, authrois
 }
 
 // Returns true if valid password.
-fn isValidPassword(password: &str, authroisedLogin: bool) -> bool
-{
-    if (authroisedLogin)                                                            // Check if user name is for authorised user.
-    {
-        return !strcmp(password, "334");                                            // Only valid password is 334 for user nhreyes, for testing purposes.
-    }
-    else
-    {
-        return isEmailAddress(password);                                            // Public users must have email address for password.
+fn is_valid_password(password: &str, authroisedLogin: bool) -> bool {
+    if authroisedLogin {
+        return password == "334";
+    } else {
+        return is_email_address(password);
     }
 }
 
 // Client sent SYST command, returns false if fails.
-fn commandSystemInformation(ns: &TcpStream, debug: bool) -> bool
-{
-    char sendBuffer[BUFFER_SIZE];                                                   // Set up send buffer.
-    memset(&sendBuffer, 0, BUFFER_SIZE);                                            // Ensure blank.
+fn command_system_information(ns: &TcpStream, debug: bool) -> bool {
+    let mut send_buffer: [MaybeUninit<u8>; BUFFER_SIZE] = Default::default(); // Set up send buffer
+    let send_buffer = unsafe { std::mem::transmute::<_, &mut [u8; BUFFER_SIZE]>(send_buffer) }; // Ensure blank
 
-    std::cout << "System information requested." << std::endl;
+    println!("System information requested.");
 
-    sprintf(sendBuffer,"215 Windows Type: WIN64\r\n");                              // Add message to send buffer.
-    int bytes = send(ns, sendBuffer, strlen(sendBuffer), 0);                        // Send reply to client.
+    let message = "215 Windows Type: WIN64\r\n";
+    let bytes = match ns.write(message.as_bytes()) {
+        Ok(b) => b,
+        Err(_) => return false, // Message not sent, return that connection ended
+    };
 
-    if (debug)                                                                      // Check if debug on.
-    {
-        std::cout << "---> " << sendBuffer;
+    if debug {
+        print!("---> {}", message);
     }
 
-    if (bytes < 0)                                                                  // Check if message sent.
-    {
-        return false;                                                               // Message not sent, return that connection ended.
+    if bytes < 0 {
+        return false; // Message not sent, return that connection ended
     }
 
-    return true;                                                                    // Connection not ended, command handled.
+    true // Connection not ended, command handled
 }
 
 // Client sent QUIT command, returns false if fails.
@@ -756,7 +494,7 @@ fn commandQuit(ns: &TcpStream, debug: bool) -> bool
 {
     std::cout << "Client has quit the session." << std::endl;
 
-    return false;                                                                   // Return that connection ended.
+    false
 }
 
 // Client sent PORT command, returns false if fails.
@@ -772,9 +510,9 @@ fn commandDataPort(ns: &TcpStream, sDataActive: &TcpStream, receiveBuffer: &str,
     memset(&portBuffer, 0, 6);                                                      // Ensure blank.
 
     bool success = getClientIPPort(ns, receiveBuffer, ipBuffer, portBuffer, debug); // Get the IP address and port of the client.
-    if (!success)                                                                   // Did not succeed.
+    if !success                                                                   // Did not succeed.
     {
-        return sendArgumentSyntaxError(ns, debug);                                  // Send error to client.
+        return send_argument_syntax_error(ns, debug);                                  // Send error to client.
     }
 
     struct addrinfo *result = NULL;                                                 // Structure for client's address information.
@@ -811,54 +549,23 @@ fn commandDataPort(ns: &TcpStream, sDataActive: &TcpStream, receiveBuffer: &str,
     sprintf(sendBuffer,"200 PORT Command successful.\r\n");                         // Add message to send buffer.
     int bytes = send(ns, sendBuffer, strlen(sendBuffer), 0);                        // Send reply to client.
 
-    if (debug)                                                                      // Check if debug on.
-    {
+    if debug {
         std::cout << "---> " << sendBuffer;
     }
 
-    if (bytes < 0)                                                                  // Check if message sent.
-    {
-        return false;                                                               // Message not sent, return that connection ended.
+    if bytes < 0 {
+        return false;
     }
 
-    if (debug)                                                                      // Check if debug on.
-    {
+    if debug {
         std::cout << "<<<DEBUG INFO>>>: Connected to client's data connection." << std::endl;
     }
 
-    return success;                                                                 // Connection not ended, command handled.
+    success
 }
 
 // Gets the client's IP and port number for active connection.
-/*fn getClientIPPort(SOCKET &ns, char receiveBuffer[], char ipBuffer[], char portBuffer[], debug: bool) -> bool
-{
-    int activePort[2], activeIP[4];                                                 // Stores port and IP for client transfer.
-
-    int scannedItems = sscanf(receiveBuffer, "PORT %d,%d,%d,%d,%d,%d",              // Get port and IP information from client message.
-                              &activeIP[0], &activeIP[1], &activeIP[2], &activeIP[3],
-                              &activePort[0], &activePort[1]);
-
-    if (scannedItems < 6)                                                           // Check that syntax as expected.
-    {
-        return sendArgumentSyntaxError(ns, debug);                                  // Failed but don't end connection.
-    }
-
-    sprintf(ipBuffer, "%d.%d.%d.%d", activeIP[0], activeIP[1], activeIP[2], activeIP[3]); // Create decimal representation of IP (IPv4 format).
-
-    std::cout << "\tClient's IP is " << ipBuffer << std::endl;                      // IPv4 format client address.
-
-    int portDecimal = activePort[0];                                                // The port number as a decimal.
-    portDecimal = portDecimal << 8;                                                 // First number is most significant 8 bits.
-    portDecimal += activePort[1];                                                   // Second number is least significant 8 bits.
-
-    sprintf(portBuffer, "%hu", portDecimal);                                        // Copy port decimal into port buffer.
-
-    std::cout << "\tClient's Port is " << portBuffer << std::endl;
-    printf("===================================================\n");
-
-    return true;
-}*/
-fn get_client_ip_port(ns: &std::net::TcpStream, receive_buffer: &str, debug: bool) -> io::Result<(String, String)> {
+fn get_client_ip_port(ns: &TcpStream, receive_buffer: &str, debug: bool) -> io::Result<(String, String)> {
     let parts: Vec<&str> = receive_buffer.split(',').collect();
 
     if parts.len() != 6 || !receive_buffer.starts_with("PORT ") {
@@ -894,40 +601,9 @@ fn send_argument_syntax_error(ns: &TcpStream, debug: bool) -> bool {
         writeln!(ns, "Argument syntax error").unwrap();
     }
     Err(io::Error::new(io::ErrorKind::InvalidInput, "Argument syntax error"))
-}
-// Sends the client a message to say data connection failed.
-fn sendArgumentSyntaxError(SOCKET &ns, debug: bool) -> bool
-{
-    return send_message(ns, "501 Syntax error in arguments.\r\n", debug);
 }*/
 
 // Gets the servers address information based on arguments.
-/*fn getClientAddressInfoActive(SOCKET &ns, struct addrinfo * &result, const char ipBuffer[], const char portBuffer[], debug: bool) -> bool
-{
-    struct addrinfo hints;                                                          // Create address info hint structure.
-    memset(&hints, 0, sizeof(struct addrinfo));                                     // Clean up the structure.
-
-    hints.ai_family = AF_INET;                                                      // Set address family as internet (IPv4).
-    hints.ai_socktype = SOCK_STREAM;                                                // Set socket type as socket stream (for TCP).
-    hints.ai_protocol = 0;                                                          // Set protocol as TCP.
-
-    int iResult;                                                                    // Create return value.
-    iResult = getaddrinfo(ipBuffer, portBuffer, &hints, &result);                   // Resolve address information for client connection.
-
-    if (iResult != 0)                                                               // Check for expected execution of getaddrinfo.
-    {
-        std::cout << "getaddrinfo() for client failed: " << iResult << std::endl;
-
-        return false;                                                               // Failed.
-    }
-
-    if (debug)                                                                      // Check if debug info should be displayed.
-    {
-        std::cout << "<<<DEBUG INFO>>>: Client address information created." << std::endl;
-    }
-
-    return true;                                                                    // Completed without error.
-}*/
 fn get_client_address_info_active(ns: &TcpStream, ip_buffer: &str, port_buffer: &str, debug: bool) -> Result<SocketAddr, String> {
     let hints = libc::addrinfo {
         ai_family: libc::AF_INET,
@@ -971,48 +647,44 @@ fn allocateDataTransferSocket(sDataActive: &TcpStream, result: &addrinfo, debug:
         return false;                                                               // Failed, return false.
     }
 
-    if (debug)                                                                      // Check if debug info should be displayed.
-    {
+    if debug {
         std::cout << "<<<DEBUG INFO>>>: Data transfer socket allocated." << std::endl;
     }
 
-    return true;                                                                    // Completed without error.
+    true
 }
 
 // Bind data transfer socket to result address.
-fn connectDataTransferSocket(sDataActive: &TcpStream, result: &addrinfo, debug: bool) -> bool
-{
-    int iResult = connect(sDataActive, result->ai_addr, (int) result->ai_addrlen);  // Connect the data transfer socket to the client's IP address and port number.
+fn connect_data_transfer_socket(sDataActive: &TcpStream, result: &addrinfo, debug: bool) -> bool {
+    let iResult = connect(sDataActive, result->ai_addr, (int) result->ai_addrlen);  // Connect the data transfer socket to the client's IP address and port number.
 
-    if (iResult == SOCKET_ERROR)                                                    // Check if error occurred in socket connection.
+    if iResult == SOCKET_ERROR
     {
         std::cout << "Active connection failed with error: " << WSAGetLastError() << std::endl;
         closesocket(sDataActive);                                                   // Close socket.
 
-        return false;                                                               // Failed, return false.
+        return false;
     }
 
-    if (debug)                                                                      // Check if debug info should be displayed.
+    if debug
     {
         std::cout << "<<<DEBUG INFO>>>: Data transfer socket connected." << std::endl;
     }
 
-    return true;                                                                    // Completed without error.
+    true
 }
 
 // Sends the client a message to say data connection failed.
-fn sendFailedActiveConnection(ns: &TcpStream, debug: bool) -> bool
-{
+fn sendFailedActiveConnection(ns: &TcpStream, debug: bool) -> bool {
     return send_message(ns, "425 Something is wrong, can't start active connection.\r\n", debug);
 }
 
 // Client sent LIST command, returns false if fails.
-fn commandList(ns: &TcpStream, sDataActive: &TcpStream, debug: bool, clientId: u64, currentDirectory: &str) -> bool
-{
-	char tmpDir[FILENAME_SIZE] = { 0 };                                             // Temp file name for clientId
-	char* pathTemp = getenv("TEMP");                                                // in Windows environment string <TEMP> MUST HAVE!!
+fn commandList(ns: &TcpStream, sDataActive: &TcpStream, debug: bool, clientId: u64, currentDirectory: &str) -> bool {
+    char tmpDir[FILENAME_SIZE] = { 0 };                                             // Temp file name for clientId
+    char* pathTemp = getenv("TEMP");                                                // in Windows environment string <TEMP> MUST HAVE!!
 
-	sprintf(tmpDir, "%s\\%lu_tmpDir.txt", pathTemp, clientId);                      // Path to file where store directories list and files list for sent.
+    sprintf(tmpDir, "%s\\%lu_tmpDir.txt", pathTemp, clientId);                      // Path to file where store directories list and files list for sent.
 
     int successLevel = sendFile(ns, sDataActive, tmpDir, debug, clientId, currentDirectory); // Create and send directory listing.
     if (successLevel != 1)                                                          // Check if direcoty listing sent correctly.
@@ -1030,28 +702,28 @@ fn commandList(ns: &TcpStream, sDataActive: &TcpStream, debug: bool, clientId: u
 // Sends specified file to client.
 fn sendFile(ns: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool, clientId: u64, currentDirectory: &str) -> i32
 {
-	char tmpDir[FILENAME_SIZE] = { 0 };                                             // Temp file name for sent as LIST
-	char tmpDir_DIR[FILENAME_SIZE] = { 0 };                                         // Temp file name with container <Directory> for clientId
-	char tmpDir_FILE[FILENAME_SIZE] = { 0 };                                        // Temp file name with container <Files> for clientId
-	char tmpDir_dirDirectory[FILENAME_SIZE] = { "dir /A:D /B" };                    // System command for create list <Directory>
-	char tmpDir_dirFiles[FILENAME_SIZE] = { "dir /A:-D /-C" };                      // System command for create list <Files>
-	char* pathTemp = NULL;
+    char tmpDir[FILENAME_SIZE] = { 0 };                                             // Temp file name for sent as LIST
+    char tmpDir_DIR[FILENAME_SIZE] = { 0 };                                         // Temp file name with container <Directory> for clientId
+    char tmpDir_FILE[FILENAME_SIZE] = { 0 };                                        // Temp file name with container <Files> for clientId
+    char tmpDir_dirDirectory[FILENAME_SIZE] = { "dir /A:D /B" };                    // System command for create list <Directory>
+    char tmpDir_dirFiles[FILENAME_SIZE] = { "dir /A:-D /-C" };                      // System command for create list <Files>
+    char* pathTemp = NULL;
 
-	if (clientId)                                                                   // Check if LIST call.
+    if (clientId)                                                                   // Check if LIST call.
     {
         std::cout << "Client has requested the directory listing." << std::endl;
 
-		pathTemp = getenv("TEMP");                                                  // in Windows environment string <TEMP> MUST HAVE!!
+        pathTemp = getenv("TEMP");                                                  // in Windows environment string <TEMP> MUST HAVE!!
 
-		sprintf(tmpDir, "%s\\%lu_tmpDir.txt", pathTemp, clientId);
-		sprintf(tmpDir_DIR, "%s\\%lu_tmpDir2.txt", pathTemp, clientId);
-		sprintf(tmpDir_FILE, "%s\\%lu_tmpDir3.txt", pathTemp, clientId);
+        sprintf(tmpDir, "%s\\%lu_tmpDir.txt", pathTemp, clientId);
+        sprintf(tmpDir_DIR, "%s\\%lu_tmpDir2.txt", pathTemp, clientId);
+        sprintf(tmpDir_FILE, "%s\\%lu_tmpDir3.txt", pathTemp, clientId);
 
-		strcat(tmpDir_dirDirectory, " >");
-		strcat(tmpDir_dirDirectory, tmpDir_DIR);
+        strcat(tmpDir_dirDirectory, " >");
+        strcat(tmpDir_dirDirectory, tmpDir_DIR);
 
-		strcat(tmpDir_dirFiles, " >");
-		strcat(tmpDir_dirFiles, tmpDir_FILE);
+        strcat(tmpDir_dirFiles, " >");
+        strcat(tmpDir_dirFiles, tmpDir_FILE);
 
         char bufferForNewFileName[FILENAME_SIZE];
         memset(&bufferForNewFileName, 0, FILENAME_SIZE);
@@ -1066,102 +738,102 @@ fn sendFile(ns: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool
         }
 
         // Save directory information in temp file.
-		executeSystemCommand(tmpDir_dirDirectory, bufferForNewFileName, debug);
+        executeSystemCommand(tmpDir_dirDirectory, bufferForNewFileName, debug);
 
-		if (debug)
+        if (debug)
         {
-			std::cout << "<<<DEBUG INFO>>>: " << tmpDir_dirDirectory << " " << bufferForNewFileName << std::endl;
+            std::cout << "<<<DEBUG INFO>>>: " << tmpDir_dirDirectory << " " << bufferForNewFileName << std::endl;
         }
 
-		executeSystemCommand(tmpDir_dirFiles, bufferForNewFileName, debug);         // Save file information in temp file.
+        executeSystemCommand(tmpDir_dirFiles, bufferForNewFileName, debug);         // Save file information in temp file.
 
-		if (debug)
+        if (debug)
         {
-			std::cout << "<<<DEBUG INFO>>>: " << tmpDir_dirFiles << " " << bufferForNewFileName << std::endl;
+            std::cout << "<<<DEBUG INFO>>>: " << tmpDir_dirFiles << " " << bufferForNewFileName << std::endl;
         }
 
-		FILE *fInDIR = fopen(tmpDir, "w");                                          // Open file.
+        FILE *fInDIR = fopen(tmpDir, "w");                                          // Open file.
 
-		FILE *fInDirectory = fopen(tmpDir_DIR, "r");                                // Open file.
+        FILE *fInDirectory = fopen(tmpDir_DIR, "r");                                // Open file.
 
-		char tmpBuffer[BUFFER_SIZE];
-		char tmpBufferDir[BUFFER_SIZE];
-		bool isFirst = true;
+        char tmpBuffer[BUFFER_SIZE];
+        char tmpBufferDir[BUFFER_SIZE];
+        bool isFirst = true;
 
-		while (!feof(fInDirectory))                                                 // Scan till end of file.
-		{
-			memset(&tmpBuffer, 0, BUFFER_SIZE);                                     // Clean buffer.
-			if (NULL == fgets(tmpBuffer, BUFFER_SIZE, fInDirectory))                // Read data.
+        while (!feof(fInDirectory))                                                 // Scan till end of file.
+        {
+            memset(&tmpBuffer, 0, BUFFER_SIZE);                                     // Clean buffer.
+            if (NULL == fgets(tmpBuffer, BUFFER_SIZE, fInDirectory))                // Read data.
             {
-				break;
+                break;
             }
-			killLastCRLF(tmpBuffer);
-			memset(&tmpBufferDir, 0, BUFFER_SIZE);
-			strcpy(tmpBufferDir, "drw-rw-rw-    1 user       group        512 Oct 15  2024 ");
-			if (!g_convertKirillica)
-			{
-				strcat(tmpBufferDir, tmpBuffer);
-			}
-			else
-			{
-				char bufferForNewFileName[FILENAME_SIZE];
-				simple_conv(tmpBuffer, strlen(tmpBuffer), bufferForNewFileName, FILENAME_SIZE, false);
-				strcat(tmpBufferDir, bufferForNewFileName);
-			}
-			if (!isFirst)
+            killLastCRLF(tmpBuffer);
+            memset(&tmpBufferDir, 0, BUFFER_SIZE);
+            strcpy(tmpBufferDir, "drw-rw-rw-    1 user       group        512 Oct 15  2024 ");
+            if (!g_convertKirillica)
             {
-				fputs("\n", fInDIR);
+                strcat(tmpBufferDir, tmpBuffer);
             }
-			else
+            else
             {
-				isFirst = false;
+                char bufferForNewFileName[FILENAME_SIZE];
+                simple_conv(tmpBuffer, strlen(tmpBuffer), bufferForNewFileName, FILENAME_SIZE, false);
+                strcat(tmpBufferDir, bufferForNewFileName);
             }
-			fputs(tmpBufferDir, fInDIR);
-			if (debug)                                                              // Check if debug on.
+            if (!isFirst)
             {
-				std::cout << tmpBufferDir << std::endl;
+                fputs("\n", fInDIR);
             }
-			if (ferror(fInDIR))
+            else
             {
-				break;
+                isFirst = false;
             }
-		}
+            fputs(tmpBufferDir, fInDIR);
+            if (debug)                                                              // Check if debug on.
+            {
+                std::cout << tmpBufferDir << std::endl;
+            }
+            if (ferror(fInDIR))
+            {
+                break;
+            }
+        }
 
-		fclose(fInDirectory);                                                       // Close the file.
+        fclose(fInDirectory);                                                       // Close the file.
 
-		FILE *fInFiles = fopen(tmpDir_FILE, "r");                                   // Open file.
+        FILE *fInFiles = fopen(tmpDir_FILE, "r");                                   // Open file.
 
-		int skipLines = 5;
-		while (!feof(fInFiles) && skipLines > 0)
-		{
-			memset(&tmpBuffer, 0, BUFFER_SIZE);
-			if (NULL == fgets(tmpBuffer, BUFFER_SIZE, fInFiles))
+        int skipLines = 5;
+        while (!feof(fInFiles) && skipLines > 0)
+        {
+            memset(&tmpBuffer, 0, BUFFER_SIZE);
+            if (NULL == fgets(tmpBuffer, BUFFER_SIZE, fInFiles))
             {
-				break;
+                break;
             }
-			skipLines--;
-		}
+            skipLines--;
+        }
 
-		int iDay, iMonths, iYear, iHour, iMinute;
-		unsigned long ulFileSize;
-		char tmpFileName[FILENAME_SIZE];
-		char tmpBufferFile[FILENAME_SIZE];
+        int iDay, iMonths, iYear, iHour, iMinute;
+        unsigned long ulFileSize;
+        char tmpFileName[FILENAME_SIZE];
+        char tmpBufferFile[FILENAME_SIZE];
 
-		while (!feof(fInFiles))                                                     // Scan till end of file.
-		{
-			memset(&tmpBuffer, 0, BUFFER_SIZE);
-			if (NULL == fgets(tmpBuffer, BUFFER_SIZE, fInFiles))
+        while (!feof(fInFiles))                                                     // Scan till end of file.
+        {
+            memset(&tmpBuffer, 0, BUFFER_SIZE);
+            if (NULL == fgets(tmpBuffer, BUFFER_SIZE, fInFiles))
             {
-				break;
+                break;
             }
-			if (isNumerical(tmpBuffer[0]))                                          // Parsing the string if there is data
-			{
-				memset(&tmpFileName, 0, FILENAME_SIZE);
-				sscanf(tmpBuffer, "%2d.%2d.%4d  %2d:%2d %17lu %*s", &iDay, &iMonths, &iYear, &iHour, &iMinute, &ulFileSize);
-				strcpy(tmpFileName, tmpBuffer + 36);
-				killLastCRLF(tmpFileName);
-				memset(&tmpBufferFile, 0, FILENAME_SIZE);
-				sprintf(tmpBufferFile, "-rw-rw-rw-    1 user       group %10lu %s %2d  %4d ", ulFileSize, g_sMonths[iMonths - 1], iDay, iYear);
+            if (isNumerical(tmpBuffer[0]))                                          // Parsing the string if there is data
+            {
+                memset(&tmpFileName, 0, FILENAME_SIZE);
+                sscanf(tmpBuffer, "%2d.%2d.%4d  %2d:%2d %17lu %*s", &iDay, &iMonths, &iYear, &iHour, &iMinute, &ulFileSize);
+                strcpy(tmpFileName, tmpBuffer + 36);
+                killLastCRLF(tmpFileName);
+                memset(&tmpBufferFile, 0, FILENAME_SIZE);
+                sprintf(tmpBufferFile, "-rw-rw-rw-    1 user       group %10lu %s %2d  %4d ", ulFileSize, g_sMonths[iMonths - 1], iDay, iYear);
                 if (!g_convertKirillica)
                 {
                     strcat(tmpBufferFile, tmpFileName);
@@ -1174,27 +846,27 @@ fn sendFile(ns: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool
                 }
                 if (!isFirst)
                 {
-					fputs("\n", fInDIR);
+                    fputs("\n", fInDIR);
                 }
-				else
+                else
                 {
-					isFirst = false;
+                    isFirst = false;
                 }
-				fputs(tmpBufferFile, fInDIR);
-				if (debug)                                                          // Check if debug on.
+                fputs(tmpBufferFile, fInDIR);
+                if (debug)                                                          // Check if debug on.
                 {
-					std::cout << tmpBufferFile << std::endl;
+                    std::cout << tmpBufferFile << std::endl;
                 }
-				if (ferror(fInDIR))
+                if (ferror(fInDIR))
                 {
-					break;
+                    break;
                 }
-			}
-		}
+            }
+        }
 
-		fclose(fInFiles);                                                           // Close the file.
+        fclose(fInFiles);                                                           // Close the file.
 
-		fclose(fInDIR);                                                             // Close the file.
+        fclose(fInDIR);                                                             // Close the file.
     }
     else
     {
@@ -1204,24 +876,24 @@ fn sendFile(ns: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool
     char sendBuffer[BUFFER_SIZE];                                                   // Set up send buffer.
     memset(&sendBuffer, 0, BUFFER_SIZE);                                            // Ensure blank.
 
-	FILE *fIn = NULL;
+    FILE *fIn = NULL;
 
-	if (clientId)                                                                   // Check if LIST call.
+    if (clientId)                                                                   // Check if LIST call.
     {
-		fIn = fopen(fileName, "rb");                                                // Open file for command LIST.
+        fIn = fopen(fileName, "rb");                                                // Open file for command LIST.
     }
-	else
-	{
-		char fileNameFull[FILENAME_SIZE];                                           // Set up buffer for FULLFILENAME.
-		memset(&fileNameFull, 0, FILENAME_SIZE);                                    // Ensure blank.
+    else
+    {
+        char fileNameFull[FILENAME_SIZE];                                           // Set up buffer for FULLFILENAME.
+        memset(&fileNameFull, 0, FILENAME_SIZE);                                    // Ensure blank.
 
-		strcpy(fileNameFull, currentDirectory);                                     // Add current directory.
+        strcpy(fileNameFull, currentDirectory);                                     // Add current directory.
 
-		if (strlen(fileNameFull) > 0)                                               // Check if not blank current directory.
+        if (strlen(fileNameFull) > 0)                                               // Check if not blank current directory.
         {
-			strcat(fileNameFull, "\\");                                             // Add separator.
+            strcat(fileNameFull, "\\");                                             // Add separator.
         }
-		strcat(fileNameFull, fileName);                                             // Add file name.
+        strcat(fileNameFull, fileName);                                             // Add file name.
 
         if (!g_convertKirillica)
         {
@@ -1233,7 +905,7 @@ fn sendFile(ns: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool
             simple_conv(fileNameFull, strlen(fileNameFull), bufferForNewFileName, FILENAME_SIZE, true);
             fIn = fopen(bufferForNewFileName, "rb");                                // Open file.
         }
-	}
+    }
 
     if (fIn == NULL)                                                                // Check if valid file.
     {
@@ -1268,14 +940,14 @@ fn sendFile(ns: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool
         {
             fclose(fIn);                                                            // Close the file.
 
-			if (clientId)                                                           // Check if LIST call.
+            if (clientId)                                                           // Check if LIST call.
             {
-				if (!debug)                                                         // Check if debug off.
-				{
-					executeSystemCommand(systemCommandDEL, tmpDir, debug);          // Delete temp file.
-					executeSystemCommand(systemCommandDEL, tmpDir_DIR, debug);      // Delete temp file.
-					executeSystemCommand(systemCommandDEL, tmpDir_FILE, debug);     // Delete temp file.
-				}	
+                if (!debug)                                                         // Check if debug off.
+                {
+                    executeSystemCommand(systemCommandDEL, tmpDir, debug);          // Delete temp file.
+                    executeSystemCommand(systemCommandDEL, tmpDir_DIR, debug);      // Delete temp file.
+                    executeSystemCommand(systemCommandDEL, tmpDir_FILE, debug);     // Delete temp file.
+                }    
             }
 
             return 0;                                                               // Message not sent, return that connection ended.
@@ -1286,44 +958,44 @@ fn sendFile(ns: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool
 
     while (!feof(fIn))                                                              // Scan till end of file.
     {
-		size_t result = fread(tempBuffer, 1, BIG_BUFFER_SIZE, fIn);                 // Get data from file into temp buffer.
+        size_t result = fread(tempBuffer, 1, BIG_BUFFER_SIZE, fIn);                 // Get data from file into temp buffer.
 
-		// send buffer to client
-		size_t sent = 0;
-		while (sent < result)                                                       // While not all sent
-		{
-			int n = send(sDataActive, tempBuffer + sent, result - sent, 0);         // Send over active connection.
+        // send buffer to client
+        size_t sent = 0;
+        while (sent < result)                                                       // While not all sent
+        {
+            int n = send(sDataActive, tempBuffer + sent, result - sent, 0);         // Send over active connection.
 
-			if (n == -1) {                                                          // Check if ERROR
-				fclose(fIn);                                                        // Close the file.
+            if (n == -1) {                                                          // Check if ERROR
+                fclose(fIn);                                                        // Close the file.
 
-				if (clientId)                                                       // Check if LIST call.
-				{
-					if (!debug)                                                     // Check if debug off.
-					{
-						executeSystemCommand(systemCommandDEL, tmpDir, debug);      // Delete temp file.
-						executeSystemCommand(systemCommandDEL, tmpDir_DIR, debug);  // Delete temp file.
-						executeSystemCommand(systemCommandDEL, tmpDir_FILE, debug); // Delete temp file.
-					}
-				}
+                if (clientId)                                                       // Check if LIST call.
+                {
+                    if (!debug)                                                     // Check if debug off.
+                    {
+                        executeSystemCommand(systemCommandDEL, tmpDir, debug);      // Delete temp file.
+                        executeSystemCommand(systemCommandDEL, tmpDir_DIR, debug);  // Delete temp file.
+                        executeSystemCommand(systemCommandDEL, tmpDir_FILE, debug); // Delete temp file.
+                    }
+                }
 
-				return 0;                                                           // Message not sent, return that connection ended.
-			}
+                return 0;                                                           // Message not sent, return that connection ended.
+            }
 
-			sent += n;                                                              // Counting the bytes sent
-		}
+            sent += n;                                                              // Counting the bytes sent
+        }
     }
 
     fclose(fIn);                                                                    // Close the file.
 
     if (clientId)                                                                   // Check if LIST call.
     {
-		if (!debug)                                                                 // Check if debug off.
-		{
-			executeSystemCommand(systemCommandDEL, tmpDir, debug);                  // Delete temp file.
-			executeSystemCommand(systemCommandDEL, tmpDir_DIR, debug);              // Delete temp file.
-			executeSystemCommand(systemCommandDEL, tmpDir_FILE, debug);             // Delete temp file.
-		}
+        if (!debug)                                                                 // Check if debug off.
+        {
+            executeSystemCommand(systemCommandDEL, tmpDir, debug);                  // Delete temp file.
+            executeSystemCommand(systemCommandDEL, tmpDir_DIR, debug);              // Delete temp file.
+            executeSystemCommand(systemCommandDEL, tmpDir_FILE, debug);             // Delete temp file.
+        }
     }
 
     std::cout << "File sent successfully."<< std::endl;
@@ -1334,31 +1006,31 @@ fn sendFile(ns: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool
 // return '0' if not have error.
 fn executeSystemCommand(commandNameWithKeys: &str, fileName: &str, debug: bool) -> i32
 {
-	char executeCommand[FILENAME_SIZE];                                             // Store for the generated command
-	memset(&executeCommand, 0, FILENAME_SIZE);                                      // Ensure empty.
+    char executeCommand[FILENAME_SIZE];                                             // Store for the generated command
+    memset(&executeCommand, 0, FILENAME_SIZE);                                      // Ensure empty.
 
-	strcpy(executeCommand, commandNameWithKeys);                                    // Set command from parameter 'commandNameWithKeys'
+    strcpy(executeCommand, commandNameWithKeys);                                    // Set command from parameter 'commandNameWithKeys'
 
-	strcat(executeCommand, " ");                                                    // Add <SPACE> between the command and the parameter
+    strcat(executeCommand, " ");                                                    // Add <SPACE> between the command and the parameter
 
-	if (NULL != strchr(fileName, ' '))                                              // Check if <SPACE> in name.
-	{
-		strcat(executeCommand, "\"");                                               // Add quotation marks.
-	}
+    if (NULL != strchr(fileName, ' '))                                              // Check if <SPACE> in name.
+    {
+        strcat(executeCommand, "\"");                                               // Add quotation marks.
+    }
 
-	strcat(executeCommand, fileName);                                               // Add parameter to command.
+    strcat(executeCommand, fileName);                                               // Add parameter to command.
 
-	if (NULL != strchr(fileName, ' '))                                              // Check if <SPACE> in name.
-	{
-		strcat(executeCommand, "\"");                                               // Add quotation marks.
-	}
+    if (NULL != strchr(fileName, ' '))                                              // Check if <SPACE> in name.
+    {
+        strcat(executeCommand, "\"");                                               // Add quotation marks.
+    }
 
-	if (debug)                                                                      // Check if debug on.
-	{
-		std::cout << "Execute command: " << executeCommand << std::endl;
-	}
+    if (debug)                                                                      // Check if debug on.
+    {
+        std::cout << "Execute command: " << executeCommand << std::endl;
+    }
 
-	return system(executeCommand);                                                  // Execute created system command.
+    return system(executeCommand);                                                  // Execute created system command.
 }
 
 // Client sent RETR command, returns false if fails.
@@ -1424,17 +1096,17 @@ fn saveFile(ns: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool
         return false;                                                               // Message not sent, return that connection ended.
     }
 
-	char fileNameFull[FILENAME_SIZE];                                               // Set up buffer for FULLFILENAME.
-	memset(&fileNameFull, 0, FILENAME_SIZE);                                        // Ensure blank.
+    char fileNameFull[FILENAME_SIZE];                                               // Set up buffer for FULLFILENAME.
+    memset(&fileNameFull, 0, FILENAME_SIZE);                                        // Ensure blank.
 
-	strcat(fileNameFull, currentDirectory);                                         // Add current directory.
+    strcat(fileNameFull, currentDirectory);                                         // Add current directory.
 
-	if (strlen(fileNameFull) > 0)                                                   // Check if not blank current directory.
-	{
-		strcat(fileNameFull, "\\");                                                 // Add separator.
-	}
+    if (strlen(fileNameFull) > 0)                                                   // Check if not blank current directory.
+    {
+        strcat(fileNameFull, "\\");                                                 // Add separator.
+    }
 
-	strcat(fileNameFull, fileName);                                                 // Add file name.
+    strcat(fileNameFull, fileName);                                                 // Add file name.
 
     std::ofstream fOut;                                                             // Output file stream.
 
@@ -1450,17 +1122,17 @@ fn saveFile(ns: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool
     }
 
     char tempBuffer[BIG_BUFFER_SIZE];                                               // Temporary character buffer.
-	int sizeBuffer = 0;
+    int sizeBuffer = 0;
     bool moreFile = true;                                                           // Flag for more file to read.
 
     while (moreFile)                                                                // Scan till end of file.
     {
         moreFile = receiveFileContents(sDataActive, tempBuffer, sizeBuffer);        // Receive file contents.
 
-		if (sizeBuffer > 0)                                                         // Save only if there is data.
-		{
-			fOut.write(tempBuffer, sizeBuffer);                                     // Save buffer to file.
-		}
+        if (sizeBuffer > 0)                                                         // Save only if there is data.
+        {
+            fOut.write(tempBuffer, sizeBuffer);                                     // Save buffer to file.
+        }
     }
 
     fOut.close();                                                                   // Close the file.
@@ -1486,7 +1158,7 @@ fn receiveFileContents(sDataActive: &TcpStream, receiveBuffer: &str, sizeBuffer:
         {
             fileToRead = false;                                                     // No message, end read loop.
 
-			break;                                                                  // To avoid writing an extra character.
+            break;                                                                  // To avoid writing an extra character.
         }
 
         i += bytes;
@@ -1507,7 +1179,7 @@ fn commandChangeWorkingDirectory(ns: &TcpStream, receiveBuffer: &str, debug: boo
 {
     removeCommand(receiveBuffer, currentDirectory);                                 // Get directory name from command.
 
-	replaceBackslash(currentDirectory);                                             // Replace '/' to '\' for Windows
+    replaceBackslash(currentDirectory);                                             // Replace '/' to '\' for Windows
 
     return send_message(ns, "250 Directory successfully changed.\r\n", debug);
 }
@@ -1520,7 +1192,7 @@ fn commandDelete(ns: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
 
     removeCommand(receiveBuffer, fileName, 5);                                      // Get file name from command.
 
-	replaceBackslash(fileName);                                                     // Replace '/' to '\' for Windows
+    replaceBackslash(fileName);                                                     // Replace '/' to '\' for Windows
     
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
@@ -1534,12 +1206,12 @@ fn commandDelete(ns: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
         simple_conv(fileName, strlen(fileName), bufferForNewName, FILENAME_SIZE, true);
     }
 
-	executeSystemCommand(systemCommandDEL, bufferForNewName, debug);
+    executeSystemCommand(systemCommandDEL, bufferForNewName, debug);
 
-	if (debug)
-	{
-		std::cout << "<<<DEBUG INFO>>>: " << systemCommandDEL << " " << fileName << std::endl;
-	}
+    if (debug)
+    {
+        std::cout << "<<<DEBUG INFO>>>: " << systemCommandDEL << " " << fileName << std::endl;
+    }
 
     return send_message(ns, "250 Requested file action okay, completed.\r\n", debug);
 }
@@ -1547,12 +1219,12 @@ fn commandDelete(ns: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
 // Client sent MKD command, returns false if connection ended.
 fn commandMakeDirectory(ns: &TcpStream, receiveBuffer: &str, debug: bool, currentDirectory: &str) -> bool
 {
-	char directoryName[FILENAME_SIZE];                                              // Stores the name of the directory to create.
+    char directoryName[FILENAME_SIZE];                                              // Stores the name of the directory to create.
     memset(&directoryName, 0, FILENAME_SIZE);                                       // Ensure empty.
 
     removeCommand(receiveBuffer, directoryName);                                    // Get directory name from command.
 
-	replaceBackslash(directoryName);                                                // Replace '/' to '\' for Windows
+    replaceBackslash(directoryName);                                                // Replace '/' to '\' for Windows
 
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
@@ -1566,12 +1238,12 @@ fn commandMakeDirectory(ns: &TcpStream, receiveBuffer: &str, debug: bool, curren
         simple_conv(directoryName, strlen(directoryName), bufferForNewName, FILENAME_SIZE, true);
     }
 
-	executeSystemCommand(systemCommandMKDIR, bufferForNewName, debug);
+    executeSystemCommand(systemCommandMKDIR, bufferForNewName, debug);
 
-	if (debug)                                                                      // Check if debug on.
-	{
-		std::cout << "<<<DEBUG INFO>>>: " << systemCommandMKDIR << " " << directoryName << std::endl;
-	}
+    if (debug)                                                                      // Check if debug on.
+    {
+        std::cout << "<<<DEBUG INFO>>>: " << systemCommandMKDIR << " " << directoryName << std::endl;
+    }
 
     char sendBuffer[BUFFER_SIZE];                                                   // Set up send buffer.
     memset(&sendBuffer, 0, BUFFER_SIZE);                                            // Ensure blank.
@@ -1584,12 +1256,12 @@ fn commandMakeDirectory(ns: &TcpStream, receiveBuffer: &str, debug: bool, curren
 // Client sent RMD command, returns false if connection ended.
 fn commandDeleteDirectory(ns: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
 {
-	char directoryName[FILENAME_SIZE];                                              // Stores the name of the directory to delete.
+    char directoryName[FILENAME_SIZE];                                              // Stores the name of the directory to delete.
     memset(&directoryName, 0, FILENAME_SIZE);                                       // Ensure empty.
 
     removeCommand(receiveBuffer, directoryName);                                    // Get directory name from command.
 
-	replaceBackslash(directoryName);                                                // Replace '/' to '\' for Windows
+    replaceBackslash(directoryName);                                                // Replace '/' to '\' for Windows
 
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
@@ -1603,12 +1275,12 @@ fn commandDeleteDirectory(ns: &TcpStream, receiveBuffer: &str, debug: bool) -> b
         simple_conv(directoryName, strlen(directoryName), bufferForNewName, FILENAME_SIZE, true);
     }
 
-	executeSystemCommand(systemCommandRMDIR, bufferForNewName, debug);
+    executeSystemCommand(systemCommandRMDIR, bufferForNewName, debug);
 
-	if (debug)
-	{
-		std::cout << "<<<DEBUG INFO>>>: " << systemCommandRMDIR << " " << directoryName << std::endl;
-	}
+    if (debug)
+    {
+        std::cout << "<<<DEBUG INFO>>>: " << systemCommandRMDIR << " " << directoryName << std::endl;
+    }
 
     return send_message(ns, "250 Requested file action okay, completed.\r\n", debug);
 }
@@ -1616,7 +1288,7 @@ fn commandDeleteDirectory(ns: &TcpStream, receiveBuffer: &str, debug: bool) -> b
 // Client sent TYPE command, returns false if connection ended.
 fn commandType(ns: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
 {
-	char typeName[BUFFER_SIZE];                                                     // Stores the name of the type.
+    char typeName[BUFFER_SIZE];                                                     // Stores the name of the type.
     memset(&typeName, 0, BUFFER_SIZE);                                              // Ensure empty.
 
     removeCommand(receiveBuffer, typeName);                                         // Get TYPE name from command.
@@ -1638,7 +1310,7 @@ fn commandFeat(ns: &TcpStream, debug: bool) -> bool
 // Client sent OPTS command, returns false if connection ended.
 fn commandOpts(ns: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
 {
-	char optsName[BUFFER_SIZE];
+    char optsName[BUFFER_SIZE];
     memset(&optsName, 0, BUFFER_SIZE);                                              // Ensure empty.
 
     removeCommand(receiveBuffer, optsName);                                         // Get TYPE name from command.
@@ -1649,7 +1321,7 @@ fn commandOpts(ns: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
     }
     else
     {
-        return sendArgumentSyntaxError(ns, debug);
+        return send_argument_syntax_error(ns, debug);
     }
 }
 
@@ -1666,7 +1338,7 @@ fn commandRenameFrom(ns: &TcpStream, receiveBuffer: &str, nameFileForRename: &st
 // Client sent RNTO command, returns false if connection ended.
 fn commandRenameTo(ns: &TcpStream, receiveBuffer: &str, nameFileForRename: &str, debug: bool) -> bool
 {
-	char nameFileToRename[FILENAME_SIZE];
+    char nameFileToRename[FILENAME_SIZE];
     memset(&nameFileToRename, 0, FILENAME_SIZE);                                    // Ensure empty.
 
     removeCommand(receiveBuffer, nameFileToRename, 5);                              // Get TYPE name from command.
@@ -1684,12 +1356,12 @@ fn commandRenameTo(ns: &TcpStream, receiveBuffer: &str, nameFileForRename: &str,
     strcpy(bufferForCommandAndFirstParameter, systemCommandRENAME);
     strcat(bufferForCommandAndFirstParameter, " ");
 
-	if (NULL != strchr(nameFileForRename, ' '))                                     // Check if <SPACE> in name.
-	{
-		strcat(bufferForCommandAndFirstParameter, "\"");                            // Add quotation marks.
-	}
+    if (NULL != strchr(nameFileForRename, ' '))                                     // Check if <SPACE> in name.
+    {
+        strcat(bufferForCommandAndFirstParameter, "\"");                            // Add quotation marks.
+    }
 
-	replaceBackslash(nameFileForRename);                                            // Replace '/' to '\' for Windows
+    replaceBackslash(nameFileForRename);                                            // Replace '/' to '\' for Windows
 
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
@@ -1705,14 +1377,14 @@ fn commandRenameTo(ns: &TcpStream, receiveBuffer: &str, nameFileForRename: &str,
 
     strcat(bufferForCommandAndFirstParameter, bufferForNewName);
 
-	if (NULL != strchr(nameFileForRename, ' '))                                     // Check if <SPACE> in name.
-	{
-		strcat(bufferForCommandAndFirstParameter, "\"");                            // Add quotation marks.
-	}
+    if (NULL != strchr(nameFileForRename, ' '))                                     // Check if <SPACE> in name.
+    {
+        strcat(bufferForCommandAndFirstParameter, "\"");                            // Add quotation marks.
+    }
 
     memset(&bufferForNewName, 0, FILENAME_SIZE);
 
-	replaceBackslash(nameFileToRename);                                             // Replace '/' to '\' for Windows
+    replaceBackslash(nameFileToRename);                                             // Replace '/' to '\' for Windows
 
     char *pch = nameFileToRename;
     
@@ -1730,7 +1402,7 @@ fn commandRenameTo(ns: &TcpStream, receiveBuffer: &str, nameFileForRename: &str,
         simple_conv(pch, strlen(pch), bufferForNewName, FILENAME_SIZE, true);
     }
 
-	int error = executeSystemCommand(bufferForCommandAndFirstParameter, bufferForNewName, debug);
+    int error = executeSystemCommand(bufferForCommandAndFirstParameter, bufferForNewName, debug);
 
     nameFileForRename[0] = '\0';
 
@@ -1811,26 +1483,25 @@ fn isNumerical(c: i8) -> bool
 {
     return (c >= '0' && c <= '9');
 }
-
+*/
 // Sends client the closing connection method and closes the socket.
-fn closeClientConnection(ns: &TcpStream, debug: bool)
-{
-    send_message(ns, "221 FTP server closed the connection.\r\n", debug);
+fn close_client_connection(s: &TcpStream, debug: bool) {
+    send_message(&s, "221 FTP server closed the connection.\r\n", debug);
 
-    std::cout << "Disconnected from client." << std::endl;
+    println!("Disconnected from client.");
 
-    closesocket(ns);                                                                // Close socket.
+    //s.close();
 }
-
+/*
 // Delete <CR> and <LF> in end of string.
 fn killLastCRLF(buffer: &str)
 {
-	while(0 < strlen(buffer) && 
-	     ('\r' == buffer[strlen(buffer) - 1] ||
-		  '\n' == buffer[strlen(buffer) - 1])
-		 )
+    while(0 < strlen(buffer) && 
+         ('\r' == buffer[strlen(buffer) - 1] ||
+          '\n' == buffer[strlen(buffer) - 1])
+         )
     {
-		buffer[strlen(buffer) - 1] = 0;
+        buffer[strlen(buffer) - 1] = 0;
     }
 }
 
@@ -1842,9 +1513,9 @@ fn replaceBackslash(buffer: &str)
 
     for (; i < length; i++)                                                         // Scan over buffer.
     {
-		if ('/' == buffer[i])                                                       // Check if right character
+        if ('/' == buffer[i])                                                       // Check if right character
         {
-			buffer[i] = '\\';                                                       // Set backslash.
+            buffer[i] = '\\';                                                       // Set backslash.
         }
     }
 }
@@ -2125,4 +1796,4 @@ fn simple_conv(inString: &str, inLen: i32, outString: &str, outMaxLen: i32, tuda
         outString[pos] = 0;
     }
 }
-
+*/
