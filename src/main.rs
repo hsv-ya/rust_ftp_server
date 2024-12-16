@@ -420,7 +420,7 @@ fn command_password(mut s: &TcpStream, receiveBuffer: &mut Vec<u8>, password: &m
         print!("---> {}", sendBuffer);
     }
 
-    if bytes < 0 {
+    if bytes == 0 {
         return false;
     }
 
@@ -450,7 +450,7 @@ fn command_system_information(mut s: &TcpStream, debug: bool) -> bool {
         print!("---> {}", message);
     }
 
-    if bytes < 0 {
+    if bytes == 0 {
         return false;
     }
 
