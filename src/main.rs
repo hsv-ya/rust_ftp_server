@@ -25,7 +25,7 @@ use std::net::{TcpListener, TcpStream, SocketAddr, ToSocketAddrs};
 use std::io::{self, Write, Read};
 //use std::io::prelude::*;
 //use std::ptr;
-
+/*
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
@@ -35,13 +35,13 @@ const SYSTEM_COMMAND_DEL: &str = "del";
 const SYSTEM_COMMAND_MKDIR: &str = "mkdir";
 const SYSTEM_COMMAND_RMDIR: &str = "rmdir";
 const SYSTEM_COMMAND_RENAME: &str = "rename";
-
+*/
 static mut CONVERT_KIRILLICA: bool = false;
 
 const DEFAULT_PORT: &str = "21";
-const BUFFER_SIZE: usize = 1024;
-const FILENAME_SIZE: usize = 1024;
-const BIG_BUFFER_SIZE: usize = 65535;
+//const BUFFER_SIZE: usize = 1024;
+//const FILENAME_SIZE: usize = 1024;
+//const BIG_BUFFER_SIZE: usize = 65535;
 
 
 // Arguments:
@@ -73,7 +73,7 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    let result: Option<SocketAddr> = None;
+    let _result: Option<SocketAddr> = None;
     let result = get_server_address_info(argc, &argv, debug);
     if result == Err(0) {
         return Err(io::Error::new(io::ErrorKind::Other, "Error getting server address info"));
@@ -154,21 +154,21 @@ fn server_listen(listener: &TcpListener, debug: bool) -> std::io::Result<()> {
 fn accept_clients(s: &TcpStream, debug: bool) -> i32 {
     accept_new_client(&s);
 
-    let sendBuffer: &str = "220 FTP Server ready.\r\n\0";
-    if !send_message(&s, sendBuffer, debug) {
+    let send_buffer: &str = "220 FTP Server ready.\r\n\0";
+    if !send_message(&s, send_buffer, debug) {
         close_client_connection(s, debug);
         return 0;
     }
 
     let mut success = true;
-    let authroisedLogin = false;
+    let mut authroised_login: bool = false;
     //let mut sDataActive: TcpStream = "";
-    let clientId = 1;
-    let mut currentDirectory = String::new();
-    let mut nameFileForRename = String::new();
+    let client_id = 1;
+    let mut current_directory = String::new();
+    let mut name_file_for_rename = String::new();
 
     while success {
-        success = communicate_with_client(&s, /*&sDataActive,*/ authroisedLogin, debug, &clientId, &mut currentDirectory, &mut nameFileForRename);
+        success = communicate_with_client(&s, /*&sDataActive,*/ &mut authroised_login, debug, &client_id, &mut current_directory, &mut name_file_for_rename);
     }
 
     close_client_connection(s, debug);
@@ -180,125 +180,123 @@ fn accept_clients(s: &TcpStream, debug: bool) -> i32 {
 fn accept_new_client(s: &TcpStream) {
     println!("A client has been accepted.");
 
-    let clientHost = &s.peer_addr().unwrap().ip().to_string();
-    let clientService = &s.peer_addr().unwrap().port().to_string();
+    let client_host = &s.peer_addr().unwrap().ip().to_string();
+    let client_service = &s.peer_addr().unwrap().port().to_string();
 
-    print!("Connected to client with IP address: {}", clientHost);
-    println!(", at Port: {}", clientService);
+    print!("Connected to client with IP address: {}", client_host);
+    println!(", at Port: {}", client_service);
 }
 
 // Receive and handle messages from client, returns false if client ends connection.
-fn communicate_with_client(s: &TcpStream, /*sDataActive: &TcpStream,*/ authroisedLogin: bool, debug: bool, clientId: &u64, currentDirectory: &mut str, nameFileForRename: &mut str) -> bool
+fn communicate_with_client(s: &TcpStream, /*sDataActive: &TcpStream,*/ authroised_login: &mut bool, debug: bool, _client_id: &u64, _current_directory: &mut str, _name_file_for_rename: &mut str) -> bool
 {
-    let mut receiveBuffer = Vec::new();
-    let mut userName = Vec::new();
+    let mut receive_buffer = Vec::new();
+    let mut user_name = Vec::new();
     let mut password = Vec::new();
 
-    let mut receiptSuccessful = true;
-
-    receiptSuccessful = receiveMessage(s, &mut receiveBuffer, debug);
-    if !receiptSuccessful {
-        return receiptSuccessful;
+    let mut receipt_successful = receive_message(s, &mut receive_buffer, debug);
+    if !receipt_successful {
+        return receipt_successful;
     }
 
-    let mut success = true;
+    let mut success;
 
-    if receiveBuffer[..5] == *"USER".as_bytes() {
-        let mut iAttempts = 0;
+    if receive_buffer[..5] == *"USER".as_bytes() {
+        let mut i_attempts = 0;
 
         loop
         {
-            success = command_user_name(&s, &mut receiveBuffer, &mut userName, authroisedLogin, debug);
+            success = command_user_name(&s, &mut receive_buffer, &mut user_name, authroised_login, debug);
 
             if !success {
-                iAttempts += 1;                                                                // Increment number of login attempts.
+                i_attempts += 1;
 
-                receiptSuccessful = receiveMessage(s, &mut receiveBuffer, debug);       // Receives message and saves it in receive buffer.
-                if !receiptSuccessful {
-                    return receiptSuccessful;                                       // Return that user ended connection.
+                receipt_successful = receive_message(s, &mut receive_buffer, debug);
+                if !receipt_successful {
+                    return receipt_successful;
                 }
             }
-            if success || iAttempts >= 3 {
+            if success || i_attempts >= 3 {
                 break;
             }
         }
     }
 
-    else if receiveBuffer[..5] == *"PASS".as_bytes() {
-        success = command_password(s, &mut receiveBuffer, &mut password, authroisedLogin, debug);
+    else if receive_buffer[..5] == *"PASS".as_bytes() {
+        success = command_password(s, &mut receive_buffer, &mut password, *authroised_login, debug);
     }
 
-    else if receiveBuffer[..5] == *"SYST".as_bytes() {
+    else if receive_buffer[..5] == *"SYST".as_bytes() {
         success = command_system_information(s, debug);
     }
 
-    else if receiveBuffer[..5] == *"QUIT".as_bytes() {
+    else if receive_buffer[..5] == *"QUIT".as_bytes() {
         success = command_quit();
     }
 /*
-    else if (strncmp(receiveBuffer, "PORT", 4) == 0)                                // Check if PORT message received from client.
+    else if (strncmp(receive_buffer, "PORT", 4) == 0)                                // Check if PORT message received from client.
     {
-        success = commandDataPort(s, sDataActive, receiveBuffer, debug);           // Handle command.
+        success = commandDataPort(s, sDataActive, receive_buffer, debug);           // Handle command.
     }
 
-    else if (strncmp(receiveBuffer, "LIST", 4) == 0)                                // Check if LIST message received from client.
+    else if (strncmp(receive_buffer, "LIST", 4) == 0)                                // Check if LIST message received from client.
     {
-        success = commandList(s, sDataActive, debug, clientId, currentDirectory);  // Handle command.
+        success = commandList(s, sDataActive, debug, clientId, current_directory);  // Handle command.
     }
 
-    else if (strncmp(receiveBuffer, "RETR", 4) == 0)                                // Check if RETR message received from client.
+    else if (strncmp(receive_buffer, "RETR", 4) == 0)                                // Check if RETR message received from client.
     {
-        success = commandRetrieve(s, sDataActive, receiveBuffer, debug, currentDirectory); // Handle command.
+        success = commandRetrieve(s, sDataActive, receive_buffer, debug, current_directory); // Handle command.
     }
 
-    else if (strncmp(receiveBuffer, "STOR", 4) == 0)                                // Check if STOR message received from client.
+    else if (strncmp(receive_buffer, "STOR", 4) == 0)                                // Check if STOR message received from client.
     {
-        success = commandStore(s, sDataActive, receiveBuffer, debug, currentDirectory); // Handle command.
+        success = commandStore(s, sDataActive, receive_buffer, debug, current_directory); // Handle command.
     }
 
-    else if (strncmp(receiveBuffer, "CWD", 3) == 0)                                 // Check if CWD message received from client.
+    else if (strncmp(receive_buffer, "CWD", 3) == 0)                                 // Check if CWD message received from client.
     {
-        success = commandChangeWorkingDirectory(s, receiveBuffer, debug, currentDirectory); // Handle command.
+        success = commandChangeWorkingDirectory(s, receive_buffer, debug, current_directory); // Handle command.
     }
 
-    else if (strncmp(receiveBuffer, "DELE", 4) == 0)                                // Check if DELE message received from client.
+    else if (strncmp(receive_buffer, "DELE", 4) == 0)                                // Check if DELE message received from client.
     {
-        success = commandDelete(s, receiveBuffer, debug);                          // Handle command.
+        success = commandDelete(s, receive_buffer, debug);                          // Handle command.
     }
 
-    else if (strncmp(receiveBuffer, "MKD", 3) == 0)                                 // Check if MKD message received from client.
+    else if (strncmp(receive_buffer, "MKD", 3) == 0)                                 // Check if MKD message received from client.
     {
-        success = commandMakeDirectory(s, receiveBuffer, debug, currentDirectory); // Handle command.
+        success = commandMakeDirectory(s, receive_buffer, debug, current_directory); // Handle command.
     }
 
-    else if (strncmp(receiveBuffer, "RMD", 3) == 0)                                 // Check if RMD message received from client.
+    else if (strncmp(receive_buffer, "RMD", 3) == 0)                                 // Check if RMD message received from client.
     {
-        success = commandDeleteDirectory(s, receiveBuffer, debug);                 // Handle command.
+        success = commandDeleteDirectory(s, receive_buffer, debug);                 // Handle command.
     }
 
-    else if (strncmp(receiveBuffer, "TYPE", 4) == 0)                                // Check if TYPE message received from client.
+    else if (strncmp(receive_buffer, "TYPE", 4) == 0)                                // Check if TYPE message received from client.
     {
-        success = commandType(s, receiveBuffer, debug);                            // Handle command.
+        success = commandType(s, receive_buffer, debug);                            // Handle command.
     }
 
-    else if (strncmp(receiveBuffer, "FEAT", 4) == 0)                                // Check if FEAT message received from client.
+    else if (strncmp(receive_buffer, "FEAT", 4) == 0)                                // Check if FEAT message received from client.
     {
         success = commandFeat(s, debug);                                           // Handle command.
     }
     
-    else if (strncmp(receiveBuffer, "OPTS", 4) == 0)                                // Check if OPTS message received from client.
+    else if (strncmp(receive_buffer, "OPTS", 4) == 0)                                // Check if OPTS message received from client.
     {
-        success = commandOpts(s, receiveBuffer, debug);                            // Handle command.
+        success = commandOpts(s, receive_buffer, debug);                            // Handle command.
     }
 
-    else if (strncmp(receiveBuffer, "RNFR", 4) == 0)                                // Check if RNFR message received from client.
+    else if (strncmp(receive_buffer, "RNFR", 4) == 0)                                // Check if RNFR message received from client.
     {
-        success = commandRenameFrom(s, receiveBuffer, nameFileForRename, debug);   // Handle command.
+        success = commandRenameFrom(s, receive_buffer, name_file_for_rename, debug);   // Handle command.
     }
 
-    else if (strncmp(receiveBuffer, "RNTO", 4) == 0)                                // Check if RNTO message received from client.
+    else if (strncmp(receive_buffer, "RNTO", 4) == 0)                                // Check if RNTO message received from client.
     {
-        success = commandRenameTo(s, receiveBuffer, nameFileForRename, debug);     // Handle command.
+        success = commandRenameTo(s, receive_buffer, name_file_for_rename, debug);     // Handle command.
     }
 */
     else {
@@ -309,11 +307,10 @@ fn communicate_with_client(s: &TcpStream, /*sDataActive: &TcpStream,*/ authroise
 }
 
 // Receives message and saves it in receive buffer, returns false if connection ended.
-fn receiveMessage(mut s: &TcpStream, receiveBuffer: &mut Vec<u8>, debug: bool) -> bool {
-    let mut i = 0;                                                                      // Index of character of the receive buffer to look at.
-    let mut bytes = 0;                                                                  // Response of receive function.
+fn receive_message(mut s: &TcpStream, receive_buffer: &mut Vec<u8>, debug: bool) -> bool {
+    let mut i = 0;
+    let mut bytes;
 
-    let mut messageToRead = true;                                                      // If more message to read this is true.
     let mut buffer = [0; 1];
 
     loop {
@@ -325,15 +322,15 @@ fn receiveMessage(mut s: &TcpStream, receiveBuffer: &mut Vec<u8>, debug: bool) -
         if bytes == 0 {
             break;
         } else {
-            receiveBuffer.push(buffer[0]);
+            receive_buffer.push(buffer[0]);
         }
 
-        if receiveBuffer[i] == b'\n' {
-            receiveBuffer[i] = b'\0';
-            messageToRead = false;
+        if receive_buffer[i] == b'\n' {
+            receive_buffer[i] = b'\0';
+            break;
         }
 
-        else if receiveBuffer[i] != b'\r' {
+        else if receive_buffer[i] != b'\r' {
             i += 1;
         }
     }
@@ -343,33 +340,27 @@ fn receiveMessage(mut s: &TcpStream, receiveBuffer: &mut Vec<u8>, debug: bool) -
     }
 
     if debug {
-        println!("<--- {:?}\\r\\n", receiveBuffer);
+        println!("<--- {:?}\\r\\n", receive_buffer);
     }
 
     true
 }
 
 // Client sent USER command, returns false if fails.
-fn command_user_name(s: &TcpStream, receiveBuffer: &mut Vec<u8>, userName: &mut Vec<u8>, mut authroisedLogin: bool, debug: bool) -> bool
+fn command_user_name(s: &TcpStream, receive_buffer: &mut Vec<u8>, user_name: &mut Vec<u8>, authroised_login: &mut bool, debug: bool) -> bool
 {
-    remove_command(receiveBuffer, userName, 4);
+    remove_command(receive_buffer, user_name, 4);
 
-    println!("User: \"{:?}\" attempting to login.", userName);
+    println!("User: \"{:?}\" attempting to login.", user_name);
 
-    let validUserName = is_valid_user_name(userName);                                  // Check if user name is valid.
+    *authroised_login = is_valid_user_name(user_name);
 
-    if validUserName {
+    if *authroised_login {
         println!("User name valid. Password required.");
 
-        authroisedLogin = true;                                                     // Need authorised password to log in.
-
         return send_message(s, "331 Authorised login requested, please specify the password.\r\n", debug);
-    }
-    else                                                                            // User name invalid
-    {
+    } else {
         println!("User name unauthorised. Public access only.");
-
-        authroisedLogin = false;                                                    // Don't need authorised password to log in.
 
         return send_message(s, "331 Public login requested, please specify email as password.\r\n", debug);
     }
@@ -389,47 +380,47 @@ fn send_message(mut s: &TcpStream, send_buffer: &str, debug: bool) -> bool {
 }
 
 // Returns true if valid user name.
-fn is_valid_user_name(userName: &mut Vec<u8>) -> bool {
-    &*userName == b"nhreyes".as_ref()
+fn is_valid_user_name(user_name: &mut Vec<u8>) -> bool {
+    &*user_name == b"nhreyes".as_ref()
 }
 
 // Client sent PASS command, returns false if fails.
-fn command_password(mut s: &TcpStream, receiveBuffer: &mut Vec<u8>, password: &mut Vec<u8>, authroisedLogin: bool, debug: bool) -> bool {
-    remove_command(receiveBuffer, password, 4);
+fn command_password(mut s: &TcpStream, receive_buffer: &mut Vec<u8>, password: &mut Vec<u8>, authroised_login: bool, debug: bool) -> bool {
+    remove_command(receive_buffer, password, 4);
 
-    let validPassword = is_valid_password(password, authroisedLogin);
+    let valid_password = is_valid_password(password, authroised_login);
 
-    let mut sendBuffer: &str = "";
+    let send_buffer: &str;
 
-    if validPassword {
+    if valid_password {
         println!("Password valid. User logged in.");
 
-        sendBuffer = "230 Login successful.\r\n";
+        send_buffer = "230 Login successful.\r\n";
     } else {
         println!("Password invalid. Login failed.");
 
-        sendBuffer = "530 Login authentication failed.\r\n";
+        send_buffer = "530 Login authentication failed.\r\n";
     }
 
-    let bytes = match s.write(sendBuffer.as_bytes()) {
+    let bytes = match s.write(send_buffer.as_bytes()) {
         Ok(b) => b,
         Err(_) => return false,
     };
 
     if debug {
-        print!("---> {}", sendBuffer);
+        print!("---> {}", send_buffer);
     }
 
     if bytes == 0 {
         return false;
     }
 
-    validPassword
+    valid_password
 }
 
 // Returns true if valid password.
-fn is_valid_password(password: &mut Vec<u8>, authroisedLogin: bool) -> bool {
-    if authroisedLogin {
+fn is_valid_password(password: &mut Vec<u8>, authroised_login: bool) -> bool {
+    if authroised_login {
         return &*password == b"334".as_ref();
     } else {
         return is_email_address(password);
@@ -466,7 +457,7 @@ fn command_quit() -> bool
 }
 /*
 // Client sent PORT command, returns false if fails.
-fn commandDataPort(s: &TcpStream, sDataActive: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
+fn commandDataPort(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &str, debug: bool) -> bool
 {
     std::cout << "===================================================" << std::endl;
     std::cout << "\tActive FTP mode, the client is listening..." << std::endl;
@@ -477,7 +468,7 @@ fn commandDataPort(s: &TcpStream, sDataActive: &TcpStream, receiveBuffer: &str, 
     memset(&ipBuffer, 0, 40);                                                       // Ensure blank.
     memset(&portBuffer, 0, 6);                                                      // Ensure blank.
 
-    bool success = getClientIPPort(s, receiveBuffer, ipBuffer, portBuffer, debug); // Get the IP address and port of the client.
+    bool success = getClientIPPort(s, receive_buffer, ipBuffer, portBuffer, debug); // Get the IP address and port of the client.
     if !success                                                                   // Did not succeed.
     {
         return send_argument_syntax_error(s, debug);                                  // Send error to client.
@@ -511,14 +502,14 @@ fn commandDataPort(s: &TcpStream, sDataActive: &TcpStream, receiveBuffer: &str, 
         return sendFailedActiveConnection(s, debug);                               // Send error to client.
     }
 
-    char sendBuffer[BUFFER_SIZE];                                                   // Set up send buffer.
-    memset(&sendBuffer, 0, BUFFER_SIZE);                                            // Ensure blank.
+    char send_buffer[BUFFER_SIZE];                                                   // Set up send buffer.
+    memset(&send_buffer, 0, BUFFER_SIZE);                                            // Ensure blank.
 
-    sprintf(sendBuffer,"200 PORT Command successful.\r\n");                         // Add message to send buffer.
-    int bytes = send(s, sendBuffer, strlen(sendBuffer), 0);                        // Send reply to client.
+    sprintf(send_buffer,"200 PORT Command successful.\r\n");                         // Add message to send buffer.
+    int bytes = send(s, send_buffer, strlen(send_buffer), 0);                        // Send reply to client.
 
     if debug {
-        std::cout << "---> " << sendBuffer;
+        std::cout << "---> " << send_buffer;
     }
 
     if bytes < 0 {
@@ -648,13 +639,13 @@ fn sendFailedActiveConnection(s: &TcpStream, debug: bool) -> bool {
 }
 
 // Client sent LIST command, returns false if fails.
-fn commandList(s: &TcpStream, sDataActive: &TcpStream, debug: bool, clientId: u64, currentDirectory: &str) -> bool {
+fn commandList(s: &TcpStream, sDataActive: &TcpStream, debug: bool, clientId: u64, current_directory: &str) -> bool {
     char tmpDir[FILENAME_SIZE] = { 0 };                                             // Temp file name for clientId
     char* pathTemp = getenv("TEMP");                                                // in Windows environment string <TEMP> MUST HAVE!!
 
     sprintf(tmpDir, "%s\\%lu_tmpDir.txt", pathTemp, clientId);                      // Path to file where store directories list and files list for sent.
 
-    int successLevel = sendFile(s, sDataActive, tmpDir, debug, clientId, currentDirectory); // Create and send directory listing.
+    int successLevel = sendFile(s, sDataActive, tmpDir, debug, clientId, current_directory); // Create and send directory listing.
     if (successLevel != 1)                                                          // Check if direcoty listing sent correctly.
     {
         closesocket(sDataActive);                                                   // Close active connection.
@@ -668,7 +659,7 @@ fn commandList(s: &TcpStream, sDataActive: &TcpStream, debug: bool, clientId: u6
 }
 
 // Sends specified file to client.
-fn sendFile(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool, clientId: u64, currentDirectory: &str) -> i32
+fn sendFile(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool, clientId: u64, current_directory: &str) -> i32
 {
     char tmpDir[FILENAME_SIZE] = { 0 };                                             // Temp file name for sent as LIST
     char tmpDir_DIR[FILENAME_SIZE] = { 0 };                                         // Temp file name with container <Directory> for clientId
@@ -698,11 +689,11 @@ fn sendFile(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool,
 
         if (!g_convertKirillica)
         {
-            strcpy(bufferForNewFileName, currentDirectory);
+            strcpy(bufferForNewFileName, current_directory);
         }
         else
         {
-            simple_conv(currentDirectory, strlen(currentDirectory), bufferForNewFileName, FILENAME_SIZE, true);
+            simple_conv(current_directory, strlen(current_directory), bufferForNewFileName, FILENAME_SIZE, true);
         }
 
         // Save directory information in temp file.
@@ -841,8 +832,8 @@ fn sendFile(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool,
         std::cout << "Client has requested to retrieve the file: \"" << fileName << "\"." << std::endl;
     }
 
-    char sendBuffer[BUFFER_SIZE];                                                   // Set up send buffer.
-    memset(&sendBuffer, 0, BUFFER_SIZE);                                            // Ensure blank.
+    char send_buffer[BUFFER_SIZE];                                                   // Set up send buffer.
+    memset(&send_buffer, 0, BUFFER_SIZE);                                            // Ensure blank.
 
     FILE *fIn = NULL;
 
@@ -855,7 +846,7 @@ fn sendFile(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool,
         char fileNameFull[FILENAME_SIZE];                                           // Set up buffer for FULLFILENAME.
         memset(&fileNameFull, 0, FILENAME_SIZE);                                    // Ensure blank.
 
-        strcpy(fileNameFull, currentDirectory);                                     // Add current directory.
+        strcpy(fileNameFull, current_directory);                                     // Add current directory.
 
         if (strlen(fileNameFull) > 0)                                               // Check if not blank current directory.
         {
@@ -879,12 +870,12 @@ fn sendFile(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool,
     {
         std::cout << "The file: \"" << fileName << "\" does not exist." << std::endl;
 
-        sprintf(sendBuffer, "550 File name invalid.\r\n");                          // Add message to send buffer.
-        int bytes = send(s, sendBuffer, strlen(sendBuffer), 0);                    // Send reply to client.
+        sprintf(send_buffer, "550 File name invalid.\r\n");                          // Add message to send buffer.
+        int bytes = send(s, send_buffer, strlen(send_buffer), 0);                    // Send reply to client.
 
         if (debug)                                                                  // Check if debug on.
         {
-            std::cout << "---> " << sendBuffer;
+            std::cout << "---> " << send_buffer;
         }
 
         if (bytes < 0)                                                              // Check if message sent.
@@ -896,12 +887,12 @@ fn sendFile(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool,
     }
     else
     {
-        sprintf(sendBuffer, "150 Data connection ready. \r\n");                     // Add message to send buffer.
-        int bytes = send(s, sendBuffer, strlen(sendBuffer), 0);                    // Send reply to client.
+        sprintf(send_buffer, "150 Data connection ready. \r\n");                     // Add message to send buffer.
+        int bytes = send(s, send_buffer, strlen(send_buffer), 0);                    // Send reply to client.
 
         if (debug)                                                                  // Check if debug on.
         {
-            std::cout << "---> " << sendBuffer;
+            std::cout << "---> " << send_buffer;
         }
 
         if (bytes < 0)                                                              // Check if message sent.
@@ -1002,14 +993,14 @@ fn executeSystemCommand(commandNameWithKeys: &str, fileName: &str, debug: bool) 
 }
 
 // Client sent RETR command, returns false if fails.
-fn commandRetrieve(s: &TcpStream, sDataActive: &TcpStream, receiveBuffer: &str, debug: bool, currentDirectory: &str) -> bool
+fn commandRetrieve(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &str, debug: bool, current_directory: &str) -> bool
 {
     char fileName[FILENAME_SIZE];                                                   // Stores the name of the file to transfer.
     memset(&fileName, 0, FILENAME_SIZE);                                            // Ensure empty.
 
-    removeCommand(receiveBuffer, fileName);                                         // Get file name from command.
+    removeCommand(receive_buffer, fileName);                                         // Get file name from command.
 
-    bool success = sendFile(s, sDataActive, fileName, debug, 0, currentDirectory); // Send file by name.
+    bool success = sendFile(s, sDataActive, fileName, debug, 0, current_directory); // Send file by name.
     if (!success)                                                                   // Check if file sent correctly.
     {
         closesocket(sDataActive);                                                   // Close active connection.
@@ -1023,14 +1014,14 @@ fn commandRetrieve(s: &TcpStream, sDataActive: &TcpStream, receiveBuffer: &str, 
 }
 
 // Client sent STORE command, returns false if fails.
-fn commandStore(s: &TcpStream, sDataActive: &TcpStream, receiveBuffer: &str, debug: bool, currentDirectory: &str) -> bool
+fn commandStore(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &str, debug: bool, current_directory: &str) -> bool
 {
     char fileName[FILENAME_SIZE];                                                   // Stores the name of the file to transfer.
     memset(&fileName, 0, FILENAME_SIZE);                                            // Ensure empty.
 
-    removeCommand(receiveBuffer, fileName);                                         // Get file name from command.
+    removeCommand(receive_buffer, fileName);                                         // Get file name from command.
 
-    bool success = saveFile(s, sDataActive, fileName, debug, currentDirectory);    // Save the file to drive.
+    bool success = saveFile(s, sDataActive, fileName, debug, current_directory);    // Save the file to drive.
     if (!success)                                                                   // Check if direcoty listing sent correctly.
     {
         closesocket(sDataActive);                                                   // Close active connection.
@@ -1044,19 +1035,19 @@ fn commandStore(s: &TcpStream, sDataActive: &TcpStream, receiveBuffer: &str, deb
 }
 
 // Sends specified file to client.
-fn saveFile(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool, currentDirectory: &str) -> bool
+fn saveFile(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool, current_directory: &str) -> bool
 {
     std::cout << "Client has requested to store the file: \"" << fileName << "\"." << std::endl;
 
-    char sendBuffer[BUFFER_SIZE];                                                   // Set up send buffer.
-    memset(&sendBuffer, 0, BUFFER_SIZE);                                            // Ensure blank.
+    char send_buffer[BUFFER_SIZE];                                                   // Set up send buffer.
+    memset(&send_buffer, 0, BUFFER_SIZE);                                            // Ensure blank.
 
-    sprintf(sendBuffer, "150 Data connection ready.\r\n");                          // Add message to send buffer.
-    int bytes = send(s, sendBuffer, strlen(sendBuffer), 0);                        // Send reply to client.
+    sprintf(send_buffer, "150 Data connection ready.\r\n");                          // Add message to send buffer.
+    int bytes = send(s, send_buffer, strlen(send_buffer), 0);                        // Send reply to client.
 
     if (debug)                                                                      // Check if debug on.
     {
-        std::cout << "---> " << sendBuffer;
+        std::cout << "---> " << send_buffer;
     }
 
     if (bytes < 0)                                                                  // Check if message sent.
@@ -1067,7 +1058,7 @@ fn saveFile(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool,
     char fileNameFull[FILENAME_SIZE];                                               // Set up buffer for FULLFILENAME.
     memset(&fileNameFull, 0, FILENAME_SIZE);                                        // Ensure blank.
 
-    strcat(fileNameFull, currentDirectory);                                         // Add current directory.
+    strcat(fileNameFull, current_directory);                                         // Add current directory.
 
     if (strlen(fileNameFull) > 0)                                                   // Check if not blank current directory.
     {
@@ -1111,7 +1102,7 @@ fn saveFile(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, debug: bool,
 }
 
 // Receives message and saves it in receive buffer, returns false if connection ended.
-fn receiveFileContents(sDataActive: &TcpStream, receiveBuffer: &str, sizeBuffer: &i32) -> bool
+fn receiveFileContents(sDataActive: &TcpStream, receive_buffer: &str, sizeBuffer: &i32) -> bool
 {
     int i = 0;                                                                      // Index of character of the receive buffer to look at.
     int bytes = 0;                                                                  // Response of receive function.
@@ -1120,7 +1111,7 @@ fn receiveFileContents(sDataActive: &TcpStream, receiveBuffer: &str, sizeBuffer:
 
     while (fileToRead && i < BIG_BUFFER_SIZE - 1)                                   // Read each byte of file.
     {
-        bytes = recv(sDataActive, receiveBuffer + i, BIG_BUFFER_SIZE - 1 - i, 0);   // Inspect receive buffer byte by byte.
+        bytes = recv(sDataActive, receive_buffer + i, BIG_BUFFER_SIZE - 1 - i, 0);   // Inspect receive buffer byte by byte.
 
         if ((bytes == SOCKET_ERROR) || (bytes == 0))                                // If nothing in receive buffer client has disconnected.
         {
@@ -1143,22 +1134,22 @@ fn receiveFileContents(sDataActive: &TcpStream, receiveBuffer: &str, sizeBuffer:
 }
 
 // Client sent CWD command, returns false if connection ended.
-fn commandChangeWorkingDirectory(s: &TcpStream, receiveBuffer: &str, debug: bool, currentDirectory: &str) -> bool
+fn commandChangeWorkingDirectory(s: &TcpStream, receive_buffer: &str, debug: bool, current_directory: &str) -> bool
 {
-    removeCommand(receiveBuffer, currentDirectory);                                 // Get directory name from command.
+    removeCommand(receive_buffer, current_directory);                                 // Get directory name from command.
 
-    replaceBackslash(currentDirectory);                                             // Replace '/' to '\' for Windows
+    replaceBackslash(current_directory);                                             // Replace '/' to '\' for Windows
 
     return send_message(s, "250 Directory successfully changed.\r\n", debug);
 }
 
 // Client sent DELETE command, returns false if connection ended.
-fn commandDelete(s: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
+fn commandDelete(s: &TcpStream, receive_buffer: &str, debug: bool) -> bool
 {
     char fileName[FILENAME_SIZE];                                                   // Stores the name of the file to delete.
     memset(&fileName, 0, FILENAME_SIZE);                                            // Ensure empty.
 
-    removeCommand(receiveBuffer, fileName, 5);                                      // Get file name from command.
+    removeCommand(receive_buffer, fileName, 5);                                      // Get file name from command.
 
     replaceBackslash(fileName);                                                     // Replace '/' to '\' for Windows
     
@@ -1185,12 +1176,12 @@ fn commandDelete(s: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
 }
 
 // Client sent MKD command, returns false if connection ended.
-fn commandMakeDirectory(s: &TcpStream, receiveBuffer: &str, debug: bool, currentDirectory: &str) -> bool
+fn commandMakeDirectory(s: &TcpStream, receive_buffer: &str, debug: bool, current_directory: &str) -> bool
 {
     char directoryName[FILENAME_SIZE];                                              // Stores the name of the directory to create.
     memset(&directoryName, 0, FILENAME_SIZE);                                       // Ensure empty.
 
-    removeCommand(receiveBuffer, directoryName);                                    // Get directory name from command.
+    removeCommand(receive_buffer, directoryName);                                    // Get directory name from command.
 
     replaceBackslash(directoryName);                                                // Replace '/' to '\' for Windows
 
@@ -1213,21 +1204,21 @@ fn commandMakeDirectory(s: &TcpStream, receiveBuffer: &str, debug: bool, current
         std::cout << "<<<DEBUG INFO>>>: " << systemCommandMKDIR << " " << directoryName << std::endl;
     }
 
-    char sendBuffer[BUFFER_SIZE];                                                   // Set up send buffer.
-    memset(&sendBuffer, 0, BUFFER_SIZE);                                            // Ensure blank.
+    char send_buffer[BUFFER_SIZE];                                                   // Set up send buffer.
+    memset(&send_buffer, 0, BUFFER_SIZE);                                            // Ensure blank.
 
-    sprintf(sendBuffer, "257 '/%s' directory created\r\n", directoryName);          // Add message to send buffer.
+    sprintf(send_buffer, "257 '/%s' directory created\r\n", directoryName);          // Add message to send buffer.
 
-    return send_message(s, sendBuffer, debug);
+    return send_message(s, send_buffer, debug);
 }
 
 // Client sent RMD command, returns false if connection ended.
-fn commandDeleteDirectory(s: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
+fn commandDeleteDirectory(s: &TcpStream, receive_buffer: &str, debug: bool) -> bool
 {
     char directoryName[FILENAME_SIZE];                                              // Stores the name of the directory to delete.
     memset(&directoryName, 0, FILENAME_SIZE);                                       // Ensure empty.
 
-    removeCommand(receiveBuffer, directoryName);                                    // Get directory name from command.
+    removeCommand(receive_buffer, directoryName);                                    // Get directory name from command.
 
     replaceBackslash(directoryName);                                                // Replace '/' to '\' for Windows
 
@@ -1254,19 +1245,19 @@ fn commandDeleteDirectory(s: &TcpStream, receiveBuffer: &str, debug: bool) -> bo
 }
 
 // Client sent TYPE command, returns false if connection ended.
-fn commandType(s: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
+fn commandType(s: &TcpStream, receive_buffer: &str, debug: bool) -> bool
 {
     char typeName[BUFFER_SIZE];                                                     // Stores the name of the type.
     memset(&typeName, 0, BUFFER_SIZE);                                              // Ensure empty.
 
-    removeCommand(receiveBuffer, typeName);                                         // Get TYPE name from command.
+    removeCommand(receive_buffer, typeName);                                         // Get TYPE name from command.
 
-    char sendBuffer[BUFFER_SIZE];                                                   // Set up send buffer.
-    memset(&sendBuffer, 0, BUFFER_SIZE);                                            // Ensure blank.
+    char send_buffer[BUFFER_SIZE];                                                   // Set up send buffer.
+    memset(&send_buffer, 0, BUFFER_SIZE);                                            // Ensure blank.
 
-    sprintf(sendBuffer, "200 Type set to %s.\r\n", typeName);                       // Add message to send buffer.
+    sprintf(send_buffer, "200 Type set to %s.\r\n", typeName);                       // Add message to send buffer.
 
-    return send_message(s, sendBuffer, debug);
+    return send_message(s, send_buffer, debug);
 }
 
 // Client sent FEAT command, returns false if fails.
@@ -1276,12 +1267,12 @@ fn commandFeat(s: &TcpStream, debug: bool) -> bool
 }
 
 // Client sent OPTS command, returns false if connection ended.
-fn commandOpts(s: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
+fn commandOpts(s: &TcpStream, receive_buffer: &str, debug: bool) -> bool
 {
     char optsName[BUFFER_SIZE];
     memset(&optsName, 0, BUFFER_SIZE);                                              // Ensure empty.
 
-    removeCommand(receiveBuffer, optsName);                                         // Get TYPE name from command.
+    removeCommand(receive_buffer, optsName);                                         // Get TYPE name from command.
 
     if (strncmp(optsName, "UTF8 ON", 8) == 0)
     {
@@ -1294,26 +1285,26 @@ fn commandOpts(s: &TcpStream, receiveBuffer: &str, debug: bool) -> bool
 }
 
 // Client sent RNFR command, returns false if connection ended.
-fn commandRenameFrom(s: &TcpStream, receiveBuffer: &str, nameFileForRename: &str, debug: bool) -> bool
+fn commandRenameFrom(s: &TcpStream, receive_buffer: &str, name_file_for_rename: &str, debug: bool) -> bool
 {
-    nameFileForRename[0] = '\0';
+    name_file_for_rename[0] = '\0';
 
-    removeCommand(receiveBuffer, nameFileForRename, 5);                             // Get TYPE name from command.
+    removeCommand(receive_buffer, name_file_for_rename, 5);                             // Get TYPE name from command.
 
     return send_message(s, "350 Requested file action pending further information.\r\n", debug);
 }
 
 // Client sent RNTO command, returns false if connection ended.
-fn commandRenameTo(s: &TcpStream, receiveBuffer: &str, nameFileForRename: &str, debug: bool) -> bool
+fn commandRenameTo(s: &TcpStream, receive_buffer: &str, name_file_for_rename: &str, debug: bool) -> bool
 {
     char nameFileToRename[FILENAME_SIZE];
     memset(&nameFileToRename, 0, FILENAME_SIZE);                                    // Ensure empty.
 
-    removeCommand(receiveBuffer, nameFileToRename, 5);                              // Get TYPE name from command.
+    removeCommand(receive_buffer, nameFileToRename, 5);                              // Get TYPE name from command.
 
-    if ((0 == strlen(nameFileForRename)) || (0 == strlen(nameFileToRename)))
+    if ((0 == strlen(name_file_for_rename)) || (0 == strlen(nameFileToRename)))
     {
-        nameFileForRename[0] = '\0';
+        name_file_for_rename[0] = '\0';
 
         return send_message(s, "503 Bad sequence of commands.\r\n", debug);
     }
@@ -1324,28 +1315,28 @@ fn commandRenameTo(s: &TcpStream, receiveBuffer: &str, nameFileForRename: &str, 
     strcpy(bufferForCommandAndFirstParameter, systemCommandRENAME);
     strcat(bufferForCommandAndFirstParameter, " ");
 
-    if (NULL != strchr(nameFileForRename, ' '))                                     // Check if <SPACE> in name.
+    if (NULL != strchr(name_file_for_rename, ' '))                                     // Check if <SPACE> in name.
     {
         strcat(bufferForCommandAndFirstParameter, "\"");                            // Add quotation marks.
     }
 
-    replaceBackslash(nameFileForRename);                                            // Replace '/' to '\' for Windows
+    replaceBackslash(name_file_for_rename);                                            // Replace '/' to '\' for Windows
 
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
 
     if (!g_convertKirillica)
     {
-        strcpy(bufferForNewName, nameFileForRename);
+        strcpy(bufferForNewName, name_file_for_rename);
     }
     else
     {
-        simple_conv(nameFileForRename, strlen(nameFileForRename), bufferForNewName, FILENAME_SIZE, true);
+        simple_conv(name_file_for_rename, strlen(name_file_for_rename), bufferForNewName, FILENAME_SIZE, true);
     }
 
     strcat(bufferForCommandAndFirstParameter, bufferForNewName);
 
-    if (NULL != strchr(nameFileForRename, ' '))                                     // Check if <SPACE> in name.
+    if (NULL != strchr(name_file_for_rename, ' '))                                     // Check if <SPACE> in name.
     {
         strcat(bufferForCommandAndFirstParameter, "\"");                            // Add quotation marks.
     }
@@ -1372,7 +1363,7 @@ fn commandRenameTo(s: &TcpStream, receiveBuffer: &str, nameFileForRename: &str, 
 
     int error = executeSystemCommand(bufferForCommandAndFirstParameter, bufferForNewName, debug);
 
-    nameFileForRename[0] = '\0';
+    name_file_for_rename[0] = '\0';
 
     if (error)
     {
@@ -1390,16 +1381,16 @@ fn command_unknown(s: &TcpStream, debug: bool) -> bool {
 }
 
 // Takes a string with a 4 letter command at beginning and saves an output string with this removed.
-fn remove_command(inputString: &mut Vec<u8>, outputString: &mut Vec<u8>, skipCharacters: usize) {
+fn remove_command(input_string: &mut Vec<u8>, output_string: &mut Vec<u8>, skip_characters: usize) {
     let mut i: usize = 0;                                                             // Array index.
-    let length: usize = inputString.len();                                      // Length of string.
+    let length: usize = input_string.len();                                      // Length of string.
 
-    while (i + skipCharacters + 1) < length {
-        outputString[i] = inputString[i + skipCharacters + 1];
+    while (i + skip_characters + 1) < length {
+        output_string[i] = input_string[i + skip_characters + 1];
         i += 1;
     }
 
-    outputString[i] = b'\0';                                                         // Cap output string.
+    output_string[i] = b'\0';                                                         // Cap output string.
 }
 
 // Check is inputted string is valid email address (only requires an '@' before a '.').
@@ -1409,8 +1400,8 @@ fn is_email_address(address: &mut Vec<u8>) -> bool {
         return false;
     }
 
-    let mut atIndex: i32 = -1;
-    let mut dotIndex: i32 = -1;
+    let mut at_index: i32 = -1;
+    let mut dot_index: i32 = -1;
 
     let length: usize = address.len();                                          // The length of the address.
     let mut i: usize = 1;
@@ -1422,11 +1413,11 @@ fn is_email_address(address: &mut Vec<u8>) -> bool {
         {
             if c == b'@'                                                           // See if character is @ symbol.
             {
-                atIndex = i as i32;                                                        // Save index of @ symbol.
+                at_index = i as i32;                                                        // Save index of @ symbol.
             }
             else if c == b'.'                                                      // See if character is . symbol.
             {
-                dotIndex = i as i32;                                                       // Save index of . symbol.
+                dot_index = i as i32;                                                       // Save index of . symbol.
             }
             else                                                                    // Invalid character.
             {
@@ -1436,7 +1427,7 @@ fn is_email_address(address: &mut Vec<u8>) -> bool {
         i += 1;
     }
 
-    return atIndex != -1 && dotIndex != -1 && atIndex < dotIndex;
+    return at_index != -1 && dot_index != -1 && at_index < dot_index;
 }
 
 // Returns true if the character is alphabetical.
