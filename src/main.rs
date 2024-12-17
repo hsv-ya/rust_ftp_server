@@ -25,6 +25,8 @@ use std::net::{TcpListener, TcpStream, SocketAddr, ToSocketAddrs};
 use std::io::{self, Write, Read};
 //use std::io::prelude::*;
 //use std::ptr;
+use std::thread;
+
 /*
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
@@ -79,11 +81,11 @@ fn main() -> std::io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::Other, "Error getting server address info"));
     }
 
-    let listener = TcpListener::bind(result.unwrap()).unwrap();
+    let mut listener = TcpListener::bind(result.unwrap()).unwrap();
 
     show_server_info();
 
-    server_listen(&listener, debug)
+    server_listen(&mut listener, debug)
 }
 
 // Returns true if user indicated that debug mode should be on.
@@ -135,13 +137,13 @@ fn get_server_address_info(argc: usize, argv: &[String], debug: bool) -> Result<
 }
 
 // Listen for client communication and deal with it accordingly.
-fn server_listen(listener: &TcpListener, debug: bool) -> std::io::Result<()> {
+fn server_listen(listener: &mut TcpListener, debug: bool) -> std::io::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(s) => {
-                accept_clients(&s, debug);
-            },
-            Err(_e) => panic!("Error listening for connections"),
+                thread::spawn(move || handle_clients(s, debug));
+            }
+            Err(e) => panic!("Error listening for connections: {}", e),
         }
     }
 
@@ -151,12 +153,11 @@ fn server_listen(listener: &TcpListener, debug: bool) -> std::io::Result<()> {
 }
 
 // Accepts new clients and deals with commands.
-fn accept_clients(s: &TcpStream, debug: bool) -> i32 {
-    accept_new_client(&s);
+fn handle_clients(mut s: TcpStream, debug: bool) -> i32 {
+    show_client_info(&s);
 
-    let send_buffer: &str = "220 FTP Server ready.\r\n\0";
-    if !send_message(&s, send_buffer, debug) {
-        close_client_connection(s, debug);
+    if !send_message(&s, "220 FTP Server ready.\r\n", debug) {
+        close_client_connection(&s, debug);
         return 0;
     }
 
@@ -168,16 +169,16 @@ fn accept_clients(s: &TcpStream, debug: bool) -> i32 {
     let mut name_file_for_rename = String::new();
 
     while success {
-        success = communicate_with_client(&s, /*&sDataActive,*/ &mut authroised_login, debug, &client_id, &mut current_directory, &mut name_file_for_rename);
+        success = communicate_with_client(&mut s, /*&sDataActive,*/ &mut authroised_login, debug, &client_id, &mut current_directory, &mut name_file_for_rename);
     }
 
-    close_client_connection(s, debug);
+    close_client_connection(&s, debug);
 
     0
 }
 
 // Takes incoming connection and assigns new socket.
-fn accept_new_client(s: &TcpStream) {
+fn show_client_info(s: &TcpStream) {
     println!("A client has been accepted.");
 
     let client_host = &s.peer_addr().unwrap().ip().to_string();
@@ -188,8 +189,7 @@ fn accept_new_client(s: &TcpStream) {
 }
 
 // Receive and handle messages from client, returns false if client ends connection.
-fn communicate_with_client(s: &TcpStream, /*sDataActive: &TcpStream,*/ authroised_login: &mut bool, debug: bool, _client_id: &u64, _current_directory: &mut str, _name_file_for_rename: &mut str) -> bool
-{
+fn communicate_with_client(s: &mut TcpStream, /*sDataActive: &TcpStream,*/ authroised_login: &mut bool, debug: bool, _client_id: &u64, _current_directory: &mut str, _name_file_for_rename: &mut str) -> bool {
     let mut receive_buffer = Vec::new();
     let mut user_name = Vec::new();
     let mut password = Vec::new();
@@ -201,12 +201,14 @@ fn communicate_with_client(s: &TcpStream, /*sDataActive: &TcpStream,*/ authroise
 
     let mut success;
 
-    if receive_buffer[..5] == *"USER".as_bytes() {
+    let maybe_command = String::from_utf8_lossy(&receive_buffer[..4]);
+
+    if maybe_command == "USER" {
         let mut i_attempts = 0;
 
         loop
         {
-            success = command_user_name(&s, &mut receive_buffer, &mut user_name, authroised_login, debug);
+            success = command_user_name(s, &mut receive_buffer, &mut user_name, authroised_login, debug);
 
             if !success {
                 i_attempts += 1;
@@ -222,15 +224,15 @@ fn communicate_with_client(s: &TcpStream, /*sDataActive: &TcpStream,*/ authroise
         }
     }
 
-    else if receive_buffer[..5] == *"PASS".as_bytes() {
+    else if maybe_command == "PASS" {
         success = command_password(s, &mut receive_buffer, &mut password, *authroised_login, debug);
     }
 
-    else if receive_buffer[..5] == *"SYST".as_bytes() {
+    else if maybe_command == "SYST" {
         success = command_system_information(s, debug);
     }
 
-    else if receive_buffer[..5] == *"QUIT".as_bytes() {
+    else if maybe_command == "QUIT" {
         success = command_quit();
     }
 /*
@@ -308,10 +310,8 @@ fn communicate_with_client(s: &TcpStream, /*sDataActive: &TcpStream,*/ authroise
 
 // Receives message and saves it in receive buffer, returns false if connection ended.
 fn receive_message(mut s: &TcpStream, receive_buffer: &mut Vec<u8>, debug: bool) -> bool {
-    let mut i = 0;
     let mut bytes;
-
-    let mut buffer = [0; 1];
+    let mut buffer: [u8; 1] = [0];
 
     loop {
         bytes = match s.read(&mut buffer) {
@@ -321,17 +321,17 @@ fn receive_message(mut s: &TcpStream, receive_buffer: &mut Vec<u8>, debug: bool)
 
         if bytes == 0 {
             break;
-        } else {
-            receive_buffer.push(buffer[0]);
         }
 
-        if receive_buffer[i] == b'\n' {
-            receive_buffer[i] = b'\0';
+        receive_buffer.push(buffer[0]);
+
+        if buffer[0] == b'\n' {
+            receive_buffer.pop();
             break;
         }
 
-        else if receive_buffer[i] != b'\r' {
-            i += 1;
+        else if buffer[0] == b'\r' {
+            receive_buffer.pop();
         }
     }
 
@@ -340,7 +340,7 @@ fn receive_message(mut s: &TcpStream, receive_buffer: &mut Vec<u8>, debug: bool)
     }
 
     if debug {
-        println!("<--- {:?}\\r\\n", receive_buffer);
+        println!("<--- {:?}", String::from_utf8(receive_buffer.to_vec()));
     }
 
     true
@@ -350,10 +350,12 @@ fn receive_message(mut s: &TcpStream, receive_buffer: &mut Vec<u8>, debug: bool)
 fn command_user_name(s: &TcpStream, receive_buffer: &mut Vec<u8>, user_name: &mut Vec<u8>, authroised_login: &mut bool, debug: bool) -> bool
 {
     remove_command(receive_buffer, user_name, 4);
+    
+    let user_name = String::from_utf8_lossy(&user_name);
 
     println!("User: \"{:?}\" attempting to login.", user_name);
 
-    *authroised_login = is_valid_user_name(user_name);
+    *authroised_login = is_valid_user_name(&user_name);
 
     if *authroised_login {
         println!("User name valid. Password required.");
@@ -371,7 +373,7 @@ fn send_message(mut s: &TcpStream, send_buffer: &str, debug: bool) -> bool {
     match s.write(send_buffer.as_bytes()) {
         Ok(bytes) => {
             if debug {
-                println!("---> {}", send_buffer);
+                print!("---> {}", send_buffer);
             }
             bytes > 0
         },
@@ -380,8 +382,8 @@ fn send_message(mut s: &TcpStream, send_buffer: &str, debug: bool) -> bool {
 }
 
 // Returns true if valid user name.
-fn is_valid_user_name(user_name: &mut Vec<u8>) -> bool {
-    &*user_name == b"nhreyes".as_ref()
+fn is_valid_user_name(user_name: &str) -> bool {
+    user_name == "nhreyes"
 }
 
 // Client sent PASS command, returns false if fails.
@@ -421,7 +423,8 @@ fn command_password(mut s: &TcpStream, receive_buffer: &mut Vec<u8>, password: &
 // Returns true if valid password.
 fn is_valid_password(password: &mut Vec<u8>, authroised_login: bool) -> bool {
     if authroised_login {
-        return &*password == b"334".as_ref();
+        let password = String::from_utf8_lossy(&password);
+        return password == "334";
     } else {
         return is_email_address(password);
     }
@@ -449,8 +452,7 @@ fn command_system_information(mut s: &TcpStream, debug: bool) -> bool {
 }
 
 // Client sent QUIT command, returns false if fails.
-fn command_quit() -> bool
-{
+fn command_quit() -> bool {
     println!("Client has quit the session.");
 
     false
@@ -1382,15 +1384,13 @@ fn command_unknown(s: &TcpStream, debug: bool) -> bool {
 
 // Takes a string with a 4 letter command at beginning and saves an output string with this removed.
 fn remove_command(input_string: &mut Vec<u8>, output_string: &mut Vec<u8>, skip_characters: usize) {
-    let mut i: usize = 0;                                                             // Array index.
-    let length: usize = input_string.len();                                      // Length of string.
+    let mut i: usize = 0;
+    let length: usize = input_string.len();
 
     while (i + skip_characters + 1) < length {
-        output_string[i] = input_string[i + skip_characters + 1];
+        output_string.push(input_string[i + skip_characters + 1]);
         i += 1;
     }
-
-    output_string[i] = b'\0';                                                         // Cap output string.
 }
 
 // Check is inputted string is valid email address (only requires an '@' before a '.').
@@ -1403,25 +1403,19 @@ fn is_email_address(address: &mut Vec<u8>) -> bool {
     let mut at_index: i32 = -1;
     let mut dot_index: i32 = -1;
 
-    let length: usize = address.len();                                          // The length of the address.
+    let length: usize = address.len();
     let mut i: usize = 1;
 
     while i < length {
-        let c = address[i];                                                  // Get the current character from the string.
+        let c = address[i];
 
-        if !is_alphabetical(c) && !is_numerical(c)                                  // Check if not alphanumeric.
-        {
-            if c == b'@'                                                           // See if character is @ symbol.
-            {
-                at_index = i as i32;                                                        // Save index of @ symbol.
-            }
-            else if c == b'.'                                                      // See if character is . symbol.
-            {
-                dot_index = i as i32;                                                       // Save index of . symbol.
-            }
-            else                                                                    // Invalid character.
-            {
-                return false;                                                       // Not valid email address.
+        if !is_alphabetical(c) && !is_numerical(c) {
+            if c == b'@' {
+                at_index = i as i32;
+            } else if c == b'.' {
+                dot_index = i as i32;
+            } else {
+                return false;
             }
         }
         i += 1;
@@ -1442,11 +1436,9 @@ fn is_numerical(c: u8) -> bool {
 
 // Sends client the closing connection method and closes the socket.
 fn close_client_connection(s: &TcpStream, debug: bool) {
-    send_message(&s, "221 FTP server closed the connection.\r\n", debug);
+    send_message(s, "221 FTP server closed the connection.\r\n", debug);
 
     println!("Disconnected from client.");
-
-    //s.close();
 }
 /*
 // Delete <CR> and <LF> in end of string.
