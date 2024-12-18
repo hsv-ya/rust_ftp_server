@@ -216,8 +216,7 @@ fn communicate_with_client(s: &mut TcpStream, /*sDataActive: &TcpStream,*/ authr
     if maybe_command == "USER" {
         let mut i_attempts = 0;
 
-        loop
-        {
+        loop {
             success = command_user_name(s, &mut receive_buffer, &mut user_name, authroised_login);
 
             if !success {
@@ -247,67 +246,54 @@ fn communicate_with_client(s: &mut TcpStream, /*sDataActive: &TcpStream,*/ authr
     }
 /*
     else if maybe_command == "PORT" {
-    {
         success = command_data_port(s, sDataActive, receive_buffer);
     }
 
     else if maybe_command == "LIST" {
-    {
         success = command_list(s, sDataActive, client_id, current_directory);
     }
 
     else if maybe_command == "RETR" {
-    {
         success = command_retrieve(s, sDataActive, receive_buffer, current_directory);
     }
 
     else if maybe_command == "STOR" {
-    {
         success = command_store(s, sDataActive, receive_buffer, current_directory);
     }
 
     else if maybe_command == "CWD " {
-    {
         success = command_change_working_directory(s, receive_buffer, current_directory);
     }
 
     else if maybe_command == "DELE" {
-    {
         success = command_delete(s, receive_buffer);
     }
 
     else if maybe_command == "MKD " {
-    {
         success = command_make_directory(s, receive_buffer, current_directory);
     }
 
     else if maybe_command == "RMD " {
-    {
         success = command_delete_directory(s, receive_buffer);
     }
 
     else if maybe_command == "TYPE" {
-    {
         success = command_type(s, receive_buffer);
     }
 
     else if maybe_command == "FEAT" {
-    {
         success = command_feat(s);
     }
     
     else if maybe_command == "OPTS" {
-    {
         success = command_opts(s, receive_buffer);
     }
 
     else if maybe_command == "RNFR" {
-    {
         success = command_rename_from(s, receive_buffer, name_file_for_rename);
     }
 
     else if maybe_command == "RNTO" {
-    {
         success = command_rename_to(s, receive_buffer, name_file_for_rename);
     }
 */
@@ -357,10 +343,9 @@ fn receive_message(mut s: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
 }
 
 // Client sent USER command, returns false if fails.
-fn command_user_name(s: &TcpStream, receive_buffer: &mut Vec<u8>, user_name: &mut Vec<u8>, authroised_login: &mut bool) -> bool
-{
+fn command_user_name(s: &TcpStream, receive_buffer: &mut Vec<u8>, user_name: &mut Vec<u8>, authroised_login: &mut bool) -> bool {
     remove_command(receive_buffer, user_name, 4);
-    
+
     let user_name = String::from_utf8_lossy(&user_name);
 
     println!("User: \"{:?}\" attempting to login.", user_name);
@@ -386,8 +371,8 @@ fn send_message(mut s: &TcpStream, send_buffer: &str) -> bool {
                 print!("---> {}", send_buffer);
             }
             bytes > 0
-        },
-        Err(_) => false,
+        }
+        Err(_) => false
     }
 }
 
@@ -397,7 +382,7 @@ fn is_valid_user_name(user_name: &str) -> bool {
 }
 
 // Client sent PASS command, returns false if fails.
-fn command_password(mut s: &TcpStream, receive_buffer: &mut Vec<u8>, password: &mut Vec<u8>, authroised_login: bool) -> bool {
+fn command_password(s: &TcpStream, receive_buffer: &mut Vec<u8>, password: &mut Vec<u8>, authroised_login: bool) -> bool {
     remove_command(receive_buffer, password, 4);
 
     let valid_password = is_valid_password(password, authroised_login);
@@ -414,16 +399,7 @@ fn command_password(mut s: &TcpStream, receive_buffer: &mut Vec<u8>, password: &
         send_buffer = "530 Login authentication failed.\r\n";
     }
 
-    let bytes = match s.write(send_buffer.as_bytes()) {
-        Ok(b) => b,
-        Err(_) => return false,
-    };
-
-    if is_debug() {
-        print!("---> {}", send_buffer);
-    }
-
-    if bytes == 0 {
+    if !send_message(s, send_buffer) {
         return false;
     }
 
@@ -441,24 +417,10 @@ fn is_valid_password(password: &mut Vec<u8>, authroised_login: bool) -> bool {
 }
 
 // Client sent SYST command, returns false if fails.
-fn command_system_information(mut s: &TcpStream) -> bool {
+fn command_system_information(s: &TcpStream) -> bool {
     println!("System information requested.");
 
-    let message = "215 Windows Type: WIN64\r\n";
-    let bytes = match s.write(message.as_bytes()) {
-        Ok(b) => b,
-        Err(_) => return false,
-    };
-
-    if is_debug() {
-        print!("---> {}", message);
-    }
-
-    if bytes == 0 {
-        return false;
-    }
-
-    true
+    send_message(s, "215 Windows Type: WIN64\r\n")
 }
 
 // Client sent QUIT command, returns false if fails.
@@ -480,24 +442,21 @@ fn command_data_port(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &mu
     memset(&portBuffer, 0, 6);
 
     bool success = get_client_ip_and_port(s, receive_buffer, ipBuffer, portBuffer);
-    if !success
-    {
+    if !success {
         return send_argument_syntax_error(s);
     }
 
     struct addrinfo *result = NULL;
 
     success = getClientAddressInfoActive(s, result, ipBuffer, portBuffer);
-    if (!success)
-    {
+    if !success {
         freeaddrinfo(result);
         
         return sendFailedActiveConnection(s);
     }
 
     success = allocateDataTransferSocket(&sDataActive, result);
-    if (!success)
-    {
+    if !success {
         closesocket(sDataActive);
         freeaddrinfo(result);
         
@@ -505,8 +464,7 @@ fn command_data_port(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &mu
     }
 
     success = connectDataTransferSocket(sDataActive, result);
-    if (!success)
-    {
+    if !success {
         closesocket(sDataActive);
         freeaddrinfo(result);
 
@@ -611,8 +569,7 @@ fn allocateDataTransferSocket(sDataActive: &TcpStream, result: &addrinfo) -> boo
 {
     sDataActive = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
 
-    if (sDataActive == INVALID_SOCKET)
-    {
+    if sDataActive == INVALID_SOCKET {
         std::cout << "Error at socket(): " << WSAGetLastError() << std::endl;
 
         return false;
@@ -629,16 +586,14 @@ fn allocateDataTransferSocket(sDataActive: &TcpStream, result: &addrinfo) -> boo
 fn connect_data_transfer_socket(sDataActive: &TcpStream, result: &addrinfo) -> bool {
     let iResult = connect(sDataActive, result->ai_addr, (int) result->ai_addrlen);
 
-    if iResult == SOCKET_ERROR
-    {
+    if iResult == SOCKET_ERROR {
         std::cout << "Active connection failed with error: " << WSAGetLastError() << std::endl;
         closesocket(sDataActive);
 
         return false;
     }
 
-    if is_debug()
-    {
+    if is_debug() {
         std::cout << "<<<DEBUG INFO>>>: Data transfer socket connected." << std::endl;
     }
 
@@ -658,8 +613,7 @@ fn command_list(s: &TcpStream, sDataActive: &TcpStream, client_id: u64, current_
     sprintf(tmpDir, "%s\\%lu_tmpDir.txt", pathTemp, client_id);
 
     int successLevel = sendFile(s, sDataActive, tmpDir, client_id, current_directory);
-    if (successLevel != 1)
-    {
+    if successLevel != 1 {
         closesocket(sDataActive);
 
         return successLevel;
@@ -667,7 +621,7 @@ fn command_list(s: &TcpStream, sDataActive: &TcpStream, client_id: u64, current_
 
     closesocket(sDataActive);
 
-    return send_message(s, "226 Directory send OK.\r\n");
+    send_message(s, "226 Directory send OK.\r\n")
 }
 
 // Sends specified file to client.
@@ -679,8 +633,7 @@ fn send_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, client_id: 
     char tmpDir_dirFiles[FILENAME_SIZE] = { "dir /A:-D /-C" };
     char* pathTemp = NULL;
 
-    if (client_id)
-    {
+    if client_id {
         std::cout << "Client has requested the directory listing." << std::endl;
 
         pathTemp = getenv("TEMP");
@@ -698,27 +651,22 @@ fn send_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, client_id: 
         char bufferForNewFileName[FILENAME_SIZE];
         memset(&bufferForNewFileName, 0, FILENAME_SIZE);
 
-        if (!g_convertKirillica)
-        {
+        if !g_convertKirillica {
             strcpy(bufferForNewFileName, current_directory);
-        }
-        else
-        {
+        } else {
             simple_conv(current_directory, strlen(current_directory), bufferForNewFileName, FILENAME_SIZE, true);
         }
 
         // Save directory information in temp file.
         execute_system_command(tmpDir_dirDirectory, bufferForNewFileName);
 
-        if (is_debug())
-        {
+        if is_debug() {
             std::cout << "<<<DEBUG INFO>>>: " << tmpDir_dirDirectory << " " << bufferForNewFileName << std::endl;
         }
 
         execute_system_command(tmpDir_dirFiles, bufferForNewFileName);
 
-        if (is_debug())
-        {
+        if is_debug() {
             std::cout << "<<<DEBUG INFO>>>: " << tmpDir_dirFiles << " " << bufferForNewFileName << std::endl;
         }
 
@@ -730,41 +678,31 @@ fn send_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, client_id: 
         char tmpBufferDir[BUFFER_SIZE];
         bool isFirst = true;
 
-        while (!feof(fInDirectory))
-        {
+        while !feof(fInDirectory) {
             memset(&tmpBuffer, 0, BUFFER_SIZE);
-            if (NULL == fgets(tmpBuffer, BUFFER_SIZE, fInDirectory))
-            {
+            if NULL == fgets(tmpBuffer, BUFFER_SIZE, fInDirectory) {
                 break;
             }
             killLastCRLF(tmpBuffer);
             memset(&tmpBufferDir, 0, BUFFER_SIZE);
             strcpy(tmpBufferDir, "drw-rw-rw-    1 user       group        512 Oct 15  2024 ");
-            if (!g_convertKirillica)
-            {
+            if !g_convertKirillica {
                 strcat(tmpBufferDir, tmpBuffer);
-            }
-            else
-            {
+            } else {
                 char bufferForNewFileName[FILENAME_SIZE];
                 simple_conv(tmpBuffer, strlen(tmpBuffer), bufferForNewFileName, FILENAME_SIZE, false);
                 strcat(tmpBufferDir, bufferForNewFileName);
             }
-            if (!isFirst)
-            {
+            if !isFirst {
                 fputs("\n", fInDIR);
-            }
-            else
-            {
+            } else {
                 isFirst = false;
             }
             fputs(tmpBufferDir, fInDIR);
-            if (is_debug())
-            {
+            if is_debug() {
                 std::cout << tmpBufferDir << std::endl;
             }
-            if (ferror(fInDIR))
-            {
+            if ferror(fInDIR) {
                 break;
             }
         }
@@ -774,11 +712,9 @@ fn send_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, client_id: 
         FILE *fInFiles = fopen(tmpDir_FILE, "r");
 
         int skipLines = 5;
-        while (!feof(fInFiles) && skipLines > 0)
-        {
+        while !feof(fInFiles) && skipLines > 0 {
             memset(&tmpBuffer, 0, BUFFER_SIZE);
-            if (NULL == fgets(tmpBuffer, BUFFER_SIZE, fInFiles))
-            {
+            if NULL == fgets(tmpBuffer, BUFFER_SIZE, fInFiles) {
                 break;
             }
             skipLines--;
@@ -789,46 +725,35 @@ fn send_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, client_id: 
         char tmpFileName[FILENAME_SIZE];
         char tmpBufferFile[FILENAME_SIZE];
 
-        while (!feof(fInFiles))
-        {
+        while !feof(fInFiles) {
             memset(&tmpBuffer, 0, BUFFER_SIZE);
-            if (NULL == fgets(tmpBuffer, BUFFER_SIZE, fInFiles))
-            {
+            if NULL == fgets(tmpBuffer, BUFFER_SIZE, fInFiles) {
                 break;
             }
-            if (isNumerical(tmpBuffer[0]))
-            {
+            if isNumerical(tmpBuffer[0])  {
                 memset(&tmpFileName, 0, FILENAME_SIZE);
                 sscanf(tmpBuffer, "%2d.%2d.%4d  %2d:%2d %17lu %*s", &iDay, &iMonths, &iYear, &iHour, &iMinute, &ulFileSize);
                 strcpy(tmpFileName, tmpBuffer + 36);
                 killLastCRLF(tmpFileName);
                 memset(&tmpBufferFile, 0, FILENAME_SIZE);
                 sprintf(tmpBufferFile, "-rw-rw-rw-    1 user       group %10lu %s %2d  %4d ", ulFileSize, g_sMonths[iMonths - 1], iDay, iYear);
-                if (!g_convertKirillica)
-                {
+                if !g_convertKirillica  {
                     strcat(tmpBufferFile, tmpFileName);
-                }
-                else
-                {
+                } else {
                     char bufferForNewFileName[FILENAME_SIZE];
                     simple_conv(tmpFileName, strlen(tmpFileName), bufferForNewFileName, FILENAME_SIZE, false);
                     strcat(tmpBufferFile, bufferForNewFileName);
                 }
-                if (!isFirst)
-                {
+                if !isFirst {
                     fputs("\n", fInDIR);
-                }
-                else
-                {
+                } else {
                     isFirst = false;
                 }
                 fputs(tmpBufferFile, fInDIR);
-                if (is_debug())
-                {
+                if is_debug() {
                     std::cout << tmpBufferFile << std::endl;
                 }
-                if (ferror(fInDIR))
-                {
+                if ferror(fInDIR) {
                     break;
                 }
             }
@@ -837,9 +762,7 @@ fn send_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, client_id: 
         fclose(fInFiles);
 
         fclose(fInDIR);
-    }
-    else
-    {
+    } else {
         std::cout << "Client has requested to retrieve the file: \"" << fileName << "\"." << std::endl;
     }
 
@@ -848,72 +771,56 @@ fn send_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, client_id: 
 
     FILE *fIn = NULL;
 
-    if (client_id)
-    {
+    if client_id {
         fIn = fopen(fileName, "rb");
-    }
-    else
-    {
+    } else {
         char fileNameFull[FILENAME_SIZE];
         memset(&fileNameFull, 0, FILENAME_SIZE);
 
         strcpy(fileNameFull, current_directory);
 
-        if (strlen(fileNameFull) > 0)
-        {
+        if strlen(fileNameFull) > 0 {
             strcat(fileNameFull, "\\");
         }
         strcat(fileNameFull, fileName);
 
-        if (!g_convertKirillica)
-        {
+        if !g_convertKirillica {
             fIn = fopen(fileNameFull, "rb");
-        }
-        else
-        {
+        } else {
             char bufferForNewFileName[FILENAME_SIZE];
             simple_conv(fileNameFull, strlen(fileNameFull), bufferForNewFileName, FILENAME_SIZE, true);
             fIn = fopen(bufferForNewFileName, "rb");
         }
     }
 
-    if (fIn == NULL)
-    {
+    if fIn == NULL {
         std::cout << "The file: \"" << fileName << "\" does not exist." << std::endl;
 
         sprintf(send_buffer, "550 File name invalid.\r\n");
         int bytes = send(s, send_buffer, strlen(send_buffer), 0);
 
-        if (is_debug())
-        {
+        if is_debug() {
             std::cout << "---> " << send_buffer;
         }
 
-        if (bytes < 0)
-        {
+        if bytes < 0 {
             return 0;
         }
 
         return -1;
-    }
-    else
-    {
+    } else {
         sprintf(send_buffer, "150 Data connection ready. \r\n");
         int bytes = send(s, send_buffer, strlen(send_buffer), 0);
 
-        if (is_debug())
-        {
+        if is_debug() {
             std::cout << "---> " << send_buffer;
         }
 
-        if (bytes < 0)
-        {
+        if bytes < 0 {
             fclose(fIn);
 
-            if (client_id)
-            {
-                if (!is_debug())
-                {
+            if client_id {
+                if !is_debug() {
                     execute_system_command(systemCommandDEL, tmpDir);
                     execute_system_command(systemCommandDEL, tmpDir_DIR);
                     execute_system_command(systemCommandDEL, tmpDir_FILE);
@@ -926,23 +833,19 @@ fn send_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, client_id: 
 
     char tempBuffer[BIG_BUFFER_SIZE + 1];
 
-    while (!feof(fIn))
-    {
+    while !feof(fIn) {
         size_t result = fread(tempBuffer, 1, BIG_BUFFER_SIZE, fIn);
 
         // send buffer to client
         size_t sent = 0;
-        while (sent < result)
-        {
+        while sent < result {
             int n = send(sDataActive, tempBuffer + sent, result - sent, 0);
 
             if (n == -1) {
                 fclose(fIn);
 
-                if (client_id)
-                {
-                    if (!is_debug())
-                    {
+                if client_id {
+                    if !is_debug() {
                         execute_system_command(systemCommandDEL, tmpDir);
                         execute_system_command(systemCommandDEL, tmpDir_DIR);
                         execute_system_command(systemCommandDEL, tmpDir_FILE);
@@ -958,10 +861,8 @@ fn send_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, client_id: 
 
     fclose(fIn);
 
-    if (client_id)
-    {
-        if (!is_debug())
-        {
+    if client_id  {
+        if !is_debug() {
             execute_system_command(systemCommandDEL, tmpDir);
             execute_system_command(systemCommandDEL, tmpDir_DIR);
             execute_system_command(systemCommandDEL, tmpDir_FILE);
@@ -982,20 +883,17 @@ fn execute_system_command(commandNameWithKeys: &str, fileName: &str) -> i32 {
 
     strcat(executeCommand, " ");
 
-    if (NULL != strchr(fileName, ' '))
-    {
+    if NULL != strchr(fileName, ' ') {
         strcat(executeCommand, "\"");
     }
 
     strcat(executeCommand, fileName);
 
-    if (NULL != strchr(fileName, ' '))
-    {
+    if NULL != strchr(fileName, ' ') {
         strcat(executeCommand, "\"");
     }
 
-    if (is_debug())
-    {
+    if is_debug() {
         std::cout << "Execute command: " << executeCommand << std::endl;
     }
 
@@ -1010,8 +908,7 @@ fn command_retrieve(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &str
     remove_command(receive_buffer, fileName);
 
     bool success = sendFile(s, sDataActive, fileName, 0, current_directory);
-    if (!success)
-    {
+    if !success {
         closesocket(sDataActive);
 
         return success;
@@ -1019,7 +916,7 @@ fn command_retrieve(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &str
 
     closesocket(sDataActive);
 
-    return send_message(s, "226 File transfer complete.\r\n");
+    send_message(s, "226 File transfer complete.\r\n")
 }
 
 // Client sent STORE command, returns false if fails.
@@ -1030,8 +927,7 @@ fn command_store(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &str, c
     removeCommand(receive_buffer, fileName);
 
     bool success = saveFile(s, sDataActive, fileName, current_directory);
-    if (!success)
-    {
+    if !success {
         closesocket(sDataActive);
 
         return success;
@@ -1039,7 +935,7 @@ fn command_store(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &str, c
 
     closesocket(sDataActive);
 
-    return send_message(s, "226 File transfer complete.\r\n");
+    send_message(s, "226 File transfer complete.\r\n")
 }
 
 // Sends specified file to client.
@@ -1052,13 +948,11 @@ fn save_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, current_dir
     sprintf(send_buffer, "150 Data connection ready.\r\n");
     int bytes = send(s, send_buffer, strlen(send_buffer), 0);
 
-    if (is_debug())
-    {
+    if is_debug() {
         std::cout << "---> " << send_buffer;
     }
 
-    if (bytes < 0)
-    {
+    if bytes < 0 {
         return false;
     }
 
@@ -1067,8 +961,7 @@ fn save_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, current_dir
 
     strcat(fileNameFull, current_directory);
 
-    if (strlen(fileNameFull) > 0)
-    {
+    if strlen(fileNameFull) > 0 {
         strcat(fileNameFull, "\\");
     }
 
@@ -1076,12 +969,9 @@ fn save_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, current_dir
 
     std::ofstream fOut;
 
-    if (!g_convertKirillica)
-    {
+    if !g_convertKirillica {
         fOut.open(fileNameFull, std::ofstream::binary);
-    }
-    else
-    {
+    } else {
         char fileNameFullNorm[FILENAME_SIZE];
         simple_conv(fileNameFull, strlen(fileNameFull), fileNameFullNorm, FILENAME_SIZE, true);
         fOut.open(fileNameFullNorm, std::ofstream::binary);
@@ -1091,12 +981,10 @@ fn save_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, current_dir
     int sizeBuffer = 0;
     bool moreFile = true;
 
-    while (moreFile)
-    {
+    while moreFile {
         moreFile = receiveFileContents(sDataActive, tempBuffer, sizeBuffer);
 
-        if (sizeBuffer > 0)
-        {
+        if sizeBuffer > 0 {
             fOut.write(tempBuffer, sizeBuffer);
         }
     }
@@ -1105,7 +993,7 @@ fn save_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, current_dir
 
     std::cout << "File saved successfully."<< std::endl;
 
-    return true;
+    true
 }
 
 // Receives message and saves it in receive buffer, returns false if connection ended.
@@ -1115,12 +1003,10 @@ fn receive_file_contents(sDataActive: &TcpStream, receive_buffer: &str, sizeBuff
 
     bool fileToRead = true;
 
-    while (fileToRead && i < BIG_BUFFER_SIZE - 1)
-    {
+    while fileToRead && i < BIG_BUFFER_SIZE - 1 {
         bytes = recv(sDataActive, receive_buffer + i, BIG_BUFFER_SIZE - 1 - i, 0);
 
-        if ((bytes == SOCKET_ERROR) || (bytes == 0))
-        {
+        if (bytes == SOCKET_ERROR) || (bytes == 0) {
             fileToRead = false;
 
             break;
@@ -1131,12 +1017,11 @@ fn receive_file_contents(sDataActive: &TcpStream, receive_buffer: &str, sizeBuff
 
     sizeBuffer = i;
 
-    if ((bytes == SOCKET_ERROR) || (bytes == 0))
-    {
+    if (bytes == SOCKET_ERROR) || (bytes == 0) {
         return false;
     }
 
-    return true;
+    true
 }
 
 // Client sent CWD command, returns false if connection ended.
@@ -1145,7 +1030,7 @@ fn command_change_working_directory(s: &TcpStream, receive_buffer: &str, current
 
     replace_backslash(current_directory);
 
-    return send_message(s, "250 Directory successfully changed.\r\n");
+    send_message(s, "250 Directory successfully changed.\r\n")
 }
 
 // Client sent DELETE command, returns false if connection ended.
@@ -1156,27 +1041,23 @@ fn command_delete(s: &TcpStream, receive_buffer: &str) -> bool {
     remove_command(receive_buffer, fileName, 5);
 
     replace_backslash(fileName);
-    
+
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
-    
-    if (!g_convertKirillica)
-    {
+
+    if !g_convertKirillica {
         strcpy(bufferForNewName, fileName);
-    }
-    else
-    {
+    } else {
         simple_conv(fileName, strlen(fileName), bufferForNewName, FILENAME_SIZE, true);
     }
 
     execute_system_command(systemCommandDEL, bufferForNewName);
 
-    if (is_debug())
-    {
+    if is_debug() {
         std::cout << "<<<DEBUG INFO>>>: " << systemCommandDEL << " " << fileName << std::endl;
     }
 
-    return send_message(s, "250 Requested file action okay, completed.\r\n");
+    send_message(s, "250 Requested file action okay, completed.\r\n")
 }
 
 // Client sent MKD command, returns false if connection ended.
@@ -1190,20 +1071,16 @@ fn command_make_directory(s: &TcpStream, receive_buffer: &str, current_directory
 
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
-    
-    if (!g_convertKirillica)
-    {
+
+    if !g_convertKirillica {
         strcpy(bufferForNewName, directoryName);
-    }
-    else
-    {
+    } else {
         simple_conv(directoryName, strlen(directoryName), bufferForNewName, FILENAME_SIZE, true);
     }
 
     execute_system_command(systemCommandMKDIR, bufferForNewName);
 
-    if (is_debug())
-    {
+    if is_debug() {
         std::cout << "<<<DEBUG INFO>>>: " << systemCommandMKDIR << " " << directoryName << std::endl;
     }
 
@@ -1212,7 +1089,7 @@ fn command_make_directory(s: &TcpStream, receive_buffer: &str, current_directory
 
     sprintf(send_buffer, "257 '/%s' directory created\r\n", directoryName);
 
-    return send_message(s, send_buffer);
+    send_message(s, send_buffer)
 }
 
 // Client sent RMD command, returns false if connection ended.
@@ -1226,24 +1103,20 @@ fn command_delete_directory(s: &TcpStream, receive_buffer: &str) -> bool {
 
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
-    
-    if (!g_convertKirillica)
-    {
+
+    if !g_convertKirillica {
         strcpy(bufferForNewName, directoryName);
-    }
-    else
-    {
+    } else {
         simple_conv(directoryName, strlen(directoryName), bufferForNewName, FILENAME_SIZE, true);
     }
 
     execute_system_command(systemCommandRMDIR, bufferForNewName);
 
-    if (is_debug())
-    {
+    if is_debug() {
         std::cout << "<<<DEBUG INFO>>>: " << systemCommandRMDIR << " " << directoryName << std::endl;
     }
 
-    return send_message(s, "250 Requested file action okay, completed.\r\n");
+    send_message(s, "250 Requested file action okay, completed.\r\n")
 }
 
 // Client sent TYPE command, returns false if connection ended.
@@ -1258,12 +1131,12 @@ fn command_type(s: &TcpStream, receive_buffer: &str) -> bool {
 
     sprintf(send_buffer, "200 Type set to %s.\r\n", typeName);
 
-    return send_message(s, send_buffer);
+    send_message(s, send_buffer)
 }
 
 // Client sent FEAT command, returns false if fails.
 fn command_feat(s: &TcpStream) -> bool {
-    return send_message(s, "211-Extensions supported\r\n UTF8\r\n211 end\r\n");
+    send_message(s, "211-Extensions supported\r\n UTF8\r\n211 end\r\n")
 }
 
 // Client sent OPTS command, returns false if connection ended.
@@ -1273,12 +1146,9 @@ fn command_opts(s: &TcpStream, receive_buffer: &str) -> bool {
 
     remove_command(receive_buffer, optsName);
 
-    if (strncmp(optsName, "UTF8 ON", 8) == 0)
-    {
+    if strncmp(optsName, "UTF8 ON", 8) == 0 {
         return send_message(s, "200 UTF8 ON.\r\n");
-    }
-    else
-    {
+    } else {
         return send_argument_syntax_error(s);
     }
 }
@@ -1289,7 +1159,7 @@ fn command_rename_from(s: &TcpStream, receive_buffer: &str, name_file_for_rename
 
     remove_command(receive_buffer, name_file_for_rename, 5);
 
-    return send_message(s, "350 Requested file action pending further information.\r\n");
+    send_message(s, "350 Requested file action pending further information.\r\n")
 }
 
 // Client sent RNTO command, returns false if connection ended.
@@ -1299,8 +1169,7 @@ fn command_rename_to(s: &TcpStream, receive_buffer: &str, name_file_for_rename: 
 
     remove_command(receive_buffer, nameFileToRename, 5);
 
-    if ((0 == strlen(name_file_for_rename)) || (0 == strlen(nameFileToRename)))
-    {
+    if (0 == strlen(name_file_for_rename)) || (0 == strlen(nameFileToRename)) {
         name_file_for_rename[0] = '\0';
 
         return send_message(s, "503 Bad sequence of commands.\r\n");
@@ -1312,8 +1181,7 @@ fn command_rename_to(s: &TcpStream, receive_buffer: &str, name_file_for_rename: 
     strcpy(bufferForCommandAndFirstParameter, systemCommandRENAME);
     strcat(bufferForCommandAndFirstParameter, " ");
 
-    if (NULL != strchr(name_file_for_rename, ' '))
-    {
+    if NULL != strchr(name_file_for_rename, ' ') {
         strcat(bufferForCommandAndFirstParameter, "\"");
     }
 
@@ -1322,19 +1190,15 @@ fn command_rename_to(s: &TcpStream, receive_buffer: &str, name_file_for_rename: 
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
 
-    if (!g_convertKirillica)
-    {
+    if !g_convertKirillica {
         strcpy(bufferForNewName, name_file_for_rename);
-    }
-    else
-    {
+    } else {
         simple_conv(name_file_for_rename, strlen(name_file_for_rename), bufferForNewName, FILENAME_SIZE, true);
     }
 
     strcat(bufferForCommandAndFirstParameter, bufferForNewName);
 
-    if (NULL != strchr(name_file_for_rename, ' '))
-    {
+    if NULL != strchr(name_file_for_rename, ' ') {
         strcat(bufferForCommandAndFirstParameter, "\"");
     }
 
@@ -1344,17 +1208,13 @@ fn command_rename_to(s: &TcpStream, receive_buffer: &str, name_file_for_rename: 
 
     char *pch = nameFileToRename;
     
-    while(NULL != strchr(pch, '\\'))
-    {
+    while NULL != strchr(pch, '\\') {
         pch = strchr(pch, '\\') + 1;
     }
 
-    if (!g_convertKirillica)
-    {
+    if !g_convertKirillica {
         strcpy(bufferForNewName, pch);
-    }
-    else
-    {
+    } else {
         simple_conv(pch, strlen(pch), bufferForNewName, FILENAME_SIZE, true);
     }
 
@@ -1362,19 +1222,16 @@ fn command_rename_to(s: &TcpStream, receive_buffer: &str, name_file_for_rename: 
 
     name_file_for_rename[0] = '\0';
 
-    if (error)
-    {
+    if error {
         return send_message(s, "503 Bad sequence of commands.\r\n");
-    }
-    else
-    {
+    } else {
         return send_message(s, "250 Requested file action okay, file renamed.\r\n");
     }
 }
 */
 // Client sent unknown command, returns false if fails.
 fn command_unknown(s: &TcpStream) -> bool {
-    return send_message(s, "550 unrecognised command.\r\n");
+    send_message(s, "550 unrecognised command.\r\n")
 }
 
 // Takes a string with a 4 letter command at beginning and saves an output string with this removed.
@@ -1421,12 +1278,12 @@ fn is_email_address(address: &mut Vec<u8>) -> bool {
 
 // Returns true if the character is alphabetical.
 fn is_alphabetical(c: u8) -> bool {
-    return (c >= b'a' && c <= b'z') || (c >= b'A' && c <= b'Z');
+    (c >= b'a' && c <= b'z') || (c >= b'A' && c <= b'Z')
 }
 
 // Returns true if the character is a number.
 fn is_numerical(c: u8) -> bool {
-    return c >= b'0' && c <= b'9';
+    c >= b'0' && c <= b'9'
 }
 
 // Sends client the closing connection method and closes the socket.
@@ -1438,11 +1295,9 @@ fn close_client_connection(s: &TcpStream) {
 /*
 // Delete <CR> and <LF> in end of string.
 fn kill_last_cr_lf(buffer: &str) {
-    while(0 < strlen(buffer) && 
+    while 0 < strlen(buffer) && 
          ('\r' == buffer[strlen(buffer) - 1] ||
-          '\n' == buffer[strlen(buffer) - 1])
-         )
-    {
+          '\n' == buffer[strlen(buffer) - 1]) {
         buffer[strlen(buffer) - 1] = 0;
     }
 }
@@ -1452,10 +1307,8 @@ fn replace_backslash(buffer: &str) {
     size_t i = 0;
     size_t length = strlen(buffer);
 
-    for (; i < length; i++)
-    {
-        if ('/' == buffer[i])
-        {
+    for (; i < length; i++) {
+        if '/' == buffer[i] {
             buffer[i] = '\\';
         }
     }
@@ -1615,75 +1468,56 @@ fn simple_conv(inString: &str, inLen: i32, outString: &str, outMaxLen: i32, tuda
 
     int pos = 0;
 
-    if (tudaSuda)
-    {
-        for (int i = 0; i < inLen;)
-        {
-            if (b'\xd0' == inString[i] || b'\xd1' == inString[i])
-            {
+    if tudaSuda {
+        for (int i = 0; i < inLen;) {
+            if b'\xd0' == inString[i] || b'\xd1' == inString[i] {
                 bool isFound = false;
 
-                for (int q = 0; q < ALL_SYMBOLS_FOR_CONVERT - 1; q++)
-                {
-                    if (table_for_convert_Tuda[q][0] == inString[i] && table_for_convert_Tuda[q][1] == inString[i + 1])
-                    {
+                for (int q = 0; q < ALL_SYMBOLS_FOR_CONVERT - 1; q++) {
+                    if table_for_convert_Tuda[q][0] == inString[i] && table_for_convert_Tuda[q][1] == inString[i + 1] {
                         outString[pos] = table_for_convert_Tuda[q][2];
                         isFound = true;
                         break;
                     }
                 }
 
-                if (isFound)
-                {
+                if isFound {
                     pos++;
                     i++;
                 }
-            }
-            else if (b'\xe2' == inString[i])
-            {
+            } else if b'\xe2' == inString[i] {
                 bool isFound = false;
 
-                for (int q = ALL_SYMBOLS_FOR_CONVERT - 1; q < ALL_SYMBOLS_FOR_CONVERT; q++)
-                {
-                    if (table_for_convert_Tuda[q][0] == inString[i] && table_for_convert_Tuda[q][1] == inString[i + 1] && table_for_convert_Tuda[q][2] == inString[i + 2])
-                    {
+                for (int q = ALL_SYMBOLS_FOR_CONVERT - 1; q < ALL_SYMBOLS_FOR_CONVERT; q++) {
+                    if table_for_convert_Tuda[q][0] == inString[i] && table_for_convert_Tuda[q][1] == inString[i + 1] && table_for_convert_Tuda[q][2] == inString[i + 2] {
                         outString[pos] = table_for_convert_Tuda[q][3];
                         isFound = true;
                         break;
                     }
                 }
 
-                if (isFound)
-                {
+                if isFound {
                     pos++;
                     i += 2;
                 }
-            }
-            else
-            {
+            } else {
                 outString[pos] = inString[i];
                 pos++;
             }
 
             i++;
 
-            if (pos > outMaxLen)
-            {
+            if pos > outMaxLen {
                 outString[outMaxLen - 1] = 0;
                 break;
             }
         }
-    }
-    else
-    {
-        for (int i = 0; i < inLen;)
-        {
+    } else {
+        for (int i = 0; i < inLen;) {
             bool isFound = false;
 
-            for (int q = 0; q < ALL_SYMBOLS_FOR_CONVERT - 1; q++)
-            {
-                if (table_for_convert_Suda[q][2] == inString[i])
-                {
+            for (int q = 0; q < ALL_SYMBOLS_FOR_CONVERT - 1; q++) {
+                if table_for_convert_Suda[q][2] == inString[i] {
                     outString[pos] = table_for_convert_Suda[q][0];
                     outString[pos + 1] = table_for_convert_Suda[q][1];
                     isFound = true;
@@ -1691,18 +1525,13 @@ fn simple_conv(inString: &str, inLen: i32, outString: &str, outMaxLen: i32, tuda
                 }
             }
 
-            if (isFound)
-            {
+            if isFound {
                 pos++;
-            }
-            else
-            {
+            } else {
                 bool isFound2 = false;
                 
-                for (int q = ALL_SYMBOLS_FOR_CONVERT - 1; q < ALL_SYMBOLS_FOR_CONVERT; q++)
-                {
-                    if (table_for_convert_Suda[q][3] == inString[i])
-                    {
+                for (int q = ALL_SYMBOLS_FOR_CONVERT - 1; q < ALL_SYMBOLS_FOR_CONVERT; q++) {
+                    if table_for_convert_Suda[q][3] == inString[i] {
                         outString[pos] = table_for_convert_Suda[q][0];
                         outString[pos + 1] = table_for_convert_Suda[q][1];
                         outString[pos + 2] = table_for_convert_Suda[q][2];
@@ -1711,12 +1540,9 @@ fn simple_conv(inString: &str, inLen: i32, outString: &str, outMaxLen: i32, tuda
                     }
                 }
 
-                if (isFound2)
-                {
+                if isFound2 {
                     pos += 2;
-                }
-                else
-                {
+                } else {
                     outString[pos] = inString[i];
                 }
             }
@@ -1724,15 +1550,13 @@ fn simple_conv(inString: &str, inLen: i32, outString: &str, outMaxLen: i32, tuda
             pos++;
             i++;
 
-            if (pos > outMaxLen)
-            {
+            if pos > outMaxLen {
                 outString[outMaxLen - 1] = 0;
                 break;
             }
         }
     }
-    if (pos < outMaxLen)
-    {
+    if pos < outMaxLen {
         outString[pos] = 0;
     }
 }
