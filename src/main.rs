@@ -1,51 +1,47 @@
-//=======================================================================================================================
-//ACTIVE FTP SERVER Start-up Code for Assignment 1 (WinSock 2)
-
-//This code gives parts of the answers away.
-//Firstly, you must change parts of this program to make it IPv6-compliant (replace all data structures that work only with IPv4).
-//This step would require creating a makefile, as the IPv6-compliant functions require data structures that can be found only by linking with the appropritate library files. 
-//The sample TCP server codes will help you accomplish this.
-
-//OVERVIEW
-//The connection is established by ignoring USER and PASS, but sending the appropriate 3 digit codes back
-//only the active FTP mode connection is implemented (watch out for firewall issues - do not block your own FTP server!).
-
-//The ftp LIST command is fully implemented, in a very naive way using redirection and a temporary file.
-//The list may have duplications, extra lines etc, don't worry about these. You can fix it as an exercise, 
-//but no need to do that for the assignment.
-//In order to implement RETR you can use the LIST part as a startup.  RETR carries a filename, 
-//so you need to replace the name when opening the file to send.
-
-//STOR is also a few steps away, use your implementation of RETR and invert it to save the file on the server's dir
-//=======================================================================================================================
+/*
+ * ACTIVE FTP SERVER Start-up Code (WinSock 2) simple rewrite on Rust
+ *
+ * This code gives parts of the answers away.
+ * The sample TCP server codes will help you accomplish this.
+ *
+ * OVERVIEW
+ * Only the active FTP mode connection is implemented (watch out for firewall
+ * issues - do not block your own FTP server!).
+ *
+ * Only IP4
+ *
+ * The ftp LIST command is fully implemented, in a very naive way using
+ * redirection and a temporary file.
+*/
 
 use std::env;
 use std::net::{TcpListener, TcpStream, SocketAddr, ToSocketAddrs};
-//use std::str::FromStr;
-use std::io::{self, Write, Read};
-//use std::io::prelude::*;
-//use std::ptr;
-use std::thread;
+use std::io::{self, Write, Read, BufRead, BufReader};
+use std::{thread, time};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::fs::File;
+use std::process::Command;
 
-/*
+use encoding_rs::WINDOWS_1251;
+use encoding_rs_io::DecodeReaderBytesBuilder;
+
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 ];
 
 const SYSTEM_COMMAND_DEL: &str = "del";
-const SYSTEM_COMMAND_MKDIR: &str = "mkdir";
-const SYSTEM_COMMAND_RMDIR: &str = "rmdir";
-const SYSTEM_COMMAND_RENAME: &str = "rename";
-*/
+//const SYSTEM_COMMAND_MKDIR: &str = "mkdir";
+//const SYSTEM_COMMAND_RMDIR: &str = "rmdir";
+//const SYSTEM_COMMAND_RENAME: &str = "rename";
+
 static SHOW_DEBUG_MESSAGE: AtomicBool = AtomicBool::new(false);
 static mut CONVERT_KIRILLICA: bool = false;
 
 const DEFAULT_PORT: &str = "21";
 //const BUFFER_SIZE: usize = 1024;
 //const FILENAME_SIZE: usize = 1024;
-//const BIG_BUFFER_SIZE: usize = 65535;
+const BIG_BUFFER_SIZE: usize = 65535;
 
 
 // Arguments:
@@ -77,7 +73,6 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    let _result: Option<SocketAddr> = None;
     let result = get_server_address_info(argc, &argv);
     if result == Err(0) {
         return Err(io::Error::new(io::ErrorKind::Other, "Error getting server address info"));
@@ -152,7 +147,7 @@ fn server_listen(listener: &mut TcpListener) -> std::io::Result<()> {
         match stream {
             Ok(s) => {
                 thread::spawn(move || handle_clients(s));
-            }
+            },
             Err(e) => panic!("Error listening for connections: {}", e),
         }
     }
@@ -163,28 +158,32 @@ fn server_listen(listener: &mut TcpListener) -> std::io::Result<()> {
 }
 
 // Accepts new clients and deals with commands.
-fn handle_clients(mut s: TcpStream) -> i32 {
+fn handle_clients(mut s: TcpStream) {
     show_client_info(&s);
 
     if !send_message(&s, "220 FTP Server ready.\r\n") {
         close_client_connection(&s);
-        return 0;
+        return;
     }
 
     let mut success = true;
     let mut authroised_login: bool = false;
-    //let mut sDataActive: TcpStream = "";
-    let client_id = 1;
+    let mut connect_to = String::new();
+    let client_id = s.peer_addr().unwrap().port();
     let mut current_directory = String::new();
     let mut name_file_for_rename = String::new();
 
     while success {
-        success = communicate_with_client(&mut s, /*&sDataActive,*/ &mut authroised_login, &client_id, &mut current_directory, &mut name_file_for_rename);
+        success = communicate_with_client(
+            &mut s,
+            &mut connect_to,
+            &mut authroised_login,
+            client_id,
+            &mut current_directory,
+            &mut name_file_for_rename);
     }
 
     close_client_connection(&s);
-
-    0
 }
 
 // Takes incoming connection and assigns new socket.
@@ -199,7 +198,7 @@ fn show_client_info(s: &TcpStream) {
 }
 
 // Receive and handle messages from client, returns false if client ends connection.
-fn communicate_with_client(s: &mut TcpStream, /*sDataActive: &TcpStream,*/ authroised_login: &mut bool, _client_id: &u64, _current_directory: &mut str, _name_file_for_rename: &mut str) -> bool {
+fn communicate_with_client(s: &mut TcpStream, connect_to: &mut String, authroised_login: &mut bool, client_id: u16, current_directory: &mut String, _name_file_for_rename: &mut String) -> bool {
     let mut receive_buffer = Vec::new();
     let mut user_name = Vec::new();
     let mut password = Vec::new();
@@ -244,15 +243,15 @@ fn communicate_with_client(s: &mut TcpStream, /*sDataActive: &TcpStream,*/ authr
     else if maybe_command == "QUIT" {
         success = command_quit();
     }
-/*
+
     else if maybe_command == "PORT" {
-        success = command_data_port(s, sDataActive, receive_buffer);
+        success = command_port(s, connect_to, &mut receive_buffer);
     }
 
     else if maybe_command == "LIST" {
-        success = command_list(s, sDataActive, client_id, current_directory);
+        success = command_list(s, connect_to, client_id, current_directory);
     }
-
+/*
     else if maybe_command == "RETR" {
         success = command_retrieve(s, sDataActive, receive_buffer, current_directory);
     }
@@ -260,11 +259,11 @@ fn communicate_with_client(s: &mut TcpStream, /*sDataActive: &TcpStream,*/ authr
     else if maybe_command == "STOR" {
         success = command_store(s, sDataActive, receive_buffer, current_directory);
     }
-
+*/
     else if maybe_command == "CWD " {
-        success = command_change_working_directory(s, receive_buffer, current_directory);
+        success = command_change_working_directory(s, &mut receive_buffer, current_directory);
     }
-
+/*
     else if maybe_command == "DELE" {
         success = command_delete(s, receive_buffer);
     }
@@ -284,11 +283,11 @@ fn communicate_with_client(s: &mut TcpStream, /*sDataActive: &TcpStream,*/ authr
     else if maybe_command == "FEAT" {
         success = command_feat(s);
     }
-    
+*/
     else if maybe_command == "OPTS" {
-        success = command_opts(s, receive_buffer);
+        success = command_opts(s, &mut receive_buffer);
     }
-
+/*
     else if maybe_command == "RNFR" {
         success = command_rename_from(s, receive_buffer, name_file_for_rename);
     }
@@ -348,7 +347,7 @@ fn command_user_name(s: &TcpStream, receive_buffer: &mut Vec<u8>, user_name: &mu
 
     let user_name = String::from_utf8_lossy(&user_name);
 
-    println!("User: \"{:?}\" attempting to login.", user_name);
+    println!("User: \"{}\" attempting to login.", user_name);
 
     *authroised_login = is_valid_user_name(&user_name);
 
@@ -365,15 +364,16 @@ fn command_user_name(s: &TcpStream, receive_buffer: &mut Vec<u8>, user_name: &mu
 
 // Send message to client, returns true if message was sended.
 fn send_message(mut s: &TcpStream, send_buffer: &str) -> bool {
-    match s.write(send_buffer.as_bytes()) {
-        Ok(bytes) => {
+    let mut bytes: usize = send_buffer.len();
+    match s.write_all(send_buffer.as_bytes()) {
+        Ok(()) => {
             if is_debug() {
                 print!("---> {}", send_buffer);
             }
-            bytes > 0
-        }
-        Err(_) => false
-    }
+        },
+        Err(_) => bytes = 0
+    };
+    bytes == send_buffer.len()
 }
 
 // Returns true if valid user name.
@@ -429,86 +429,51 @@ fn command_quit() -> bool {
 
     false
 }
-/*
+
 // Client sent PORT command, returns false if fails.
-fn command_data_port(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
-    std::cout << "===================================================" << std::endl;
-    std::cout << "\tActive FTP mode, the client is listening..." << std::endl;
+fn command_port(s: &TcpStream, connect_to: &mut String, receive_buffer: &mut Vec<u8>) -> bool {
+    println!("===================================================");
+    println!("\tActive FTP mode, the client is listening...");
 
-    char ipBuffer[40];
-    char portBuffer[6];
+    *connect_to = get_client_ip_and_port(receive_buffer);
 
-    memset(&ipBuffer, 0, 40);
-    memset(&portBuffer, 0, 6);
-
-    bool success = get_client_ip_and_port(s, receive_buffer, ipBuffer, portBuffer);
-    if !success {
+    if connect_to.len() == 0 {
         return send_argument_syntax_error(s);
     }
 
-    struct addrinfo *result = NULL;
-
-    success = getClientAddressInfoActive(s, result, ipBuffer, portBuffer);
-    if !success {
-        freeaddrinfo(result);
-        
-        return sendFailedActiveConnection(s);
-    }
-
-    success = allocateDataTransferSocket(&sDataActive, result);
-    if !success {
-        closesocket(sDataActive);
-        freeaddrinfo(result);
-        
-        return sendFailedActiveConnection(s);
-    }
-
-    success = connectDataTransferSocket(sDataActive, result);
-    if !success {
-        closesocket(sDataActive);
-        freeaddrinfo(result);
-
-        return sendFailedActiveConnection(s);
-    }
-
-    char send_buffer[BUFFER_SIZE];
-    memset(&send_buffer, 0, BUFFER_SIZE);
-
-    sprintf(send_buffer,"200 PORT Command successful.\r\n");
-    int bytes = send(s, send_buffer, strlen(send_buffer), 0);
-
-    if is_debug() {
-        std::cout << "---> " << send_buffer;
-    }
-
-    if bytes < 0 {
-        return false;
-    }
-
-    if is_debug() {
-        std::cout << "<<<DEBUG INFO>>>: Connected to client's data connection." << std::endl;
-    }
-
-    success
+    send_message(s, "200 PORT Command successful.\r\n")
 }
 
 // Gets the client's IP and port number for active connection.
-fn get_client_ip_and_port(s: &TcpStream, receive_buffer: &str) -> io::Result<(String, String)> {
-    let parts: Vec<&str> = receive_buffer.split(',').collect();
+fn get_client_ip_and_port(receive_buffer: &mut Vec<u8>) -> String {
+    let temp_string = String::from_utf8_lossy(&receive_buffer[5..]);
+    let parts: Vec<&str> = temp_string.split(',').collect();
 
-    if parts.len() != 6 || !receive_buffer.starts_with("PORT ") {
-        return send_argument_syntax_error(s);
+    if parts.len() != 6 || !receive_buffer.starts_with(b"PORT ") {
+        return "".to_string();
     }
 
-    let active_ip: Vec<u8> = parts[1..5]
+    if is_debug() {
+        println!("{:?}", parts);
+    }
+
+    let active_ip: Vec<u8> = parts[..4]
         .iter()
         .map(|&s| s.parse::<u8>().unwrap())
         .collect();
 
-    let active_port: Vec<u16> = parts[5..]
+    if is_debug() {
+        println!("{:?}", active_ip);
+    }
+
+    let active_port: Vec<u16> = parts[4..]
         .iter()
         .map(|&s| s.parse::<u16>().unwrap())
         .collect();
+
+    if is_debug() {
+        println!("{:?}", active_port);
+    }
 
     let ip_buffer = format!("{}.{}.{}.{}", active_ip[0], active_ip[1], active_ip[2], active_ip[3]);
     println!("\tClient's IP is {}", ip_buffer);
@@ -517,7 +482,12 @@ fn get_client_ip_and_port(s: &TcpStream, receive_buffer: &str) -> io::Result<(St
     let port_buffer = port_decimal.to_string();
     println!("\tClient's Port is {}", port_buffer);
 
-    Ok((ip_buffer, port_buffer))
+    let mut result2 = String::new();
+    result2 += ip_buffer.as_str();
+    result2 += ":";
+    result2 += port_buffer.as_str();
+
+    result2
 }
 
 fn send_argument_syntax_error(s: &TcpStream) -> bool {
@@ -531,7 +501,7 @@ fn send_argument_syntax_error(s: &TcpStream) -> bool {
     }
     Err(io::Error::new(io::ErrorKind::InvalidInput, message_error))
 }*/
-
+/*
 // Gets the servers address information based on arguments.
 fn get_client_address_info_active(s: &TcpStream, ip_buffer: &str, port_buffer: &str) -> Result<SocketAddr, String> {
     let hints = libc::addrinfo {
@@ -604,196 +574,205 @@ fn connect_data_transfer_socket(sDataActive: &TcpStream, result: &addrinfo) -> b
 fn send_failed_active_connection(s: &TcpStream) -> bool {
     return send_message(s, "425 Something is wrong, can't start active connection.\r\n");
 }
+*/
 
 // Client sent LIST command, returns false if fails.
-fn command_list(s: &TcpStream, sDataActive: &TcpStream, client_id: u64, current_directory: &str) -> bool {
-    char tmpDir[FILENAME_SIZE] = { 0 };
-    char* pathTemp = getenv("TEMP");
+fn command_list(s: &TcpStream, connect_to: &mut String, client_id: u16, current_directory: &mut String) -> bool {
+    let path_temp = get_temp_directory();
 
-    sprintf(tmpDir, "%s\\%lu_tmpDir.txt", pathTemp, client_id);
+    let tmp = format!("{}\\{}_tmp_dir.txt", path_temp, client_id);
 
-    int successLevel = sendFile(s, sDataActive, tmpDir, client_id, current_directory);
-    if successLevel != 1 {
-        closesocket(sDataActive);
+    let result = send_file(s, connect_to, tmp.as_str(), client_id, current_directory.as_str());
 
-        return successLevel;
-    }
-
-    closesocket(sDataActive);
+    match result {
+        Ok(_) => {},
+        Err(_) => return false
+    };
 
     send_message(s, "226 Directory send OK.\r\n")
 }
 
+fn get_temp_directory() -> String {
+    match env::var("TEMP") {
+        Ok(val) => val,
+        Err(_) => "".to_string()
+    }
+}
+
 // Sends specified file to client.
-fn send_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, client_id: u64, current_directory: &str) -> i32 {
-    char tmpDir[FILENAME_SIZE] = { 0 };
-    char tmpDir_DIR[FILENAME_SIZE] = { 0 };
-    char tmpDir_FILE[FILENAME_SIZE] = { 0 };
-    char tmpDir_dirDirectory[FILENAME_SIZE] = { "dir /A:D /B" };
-    char tmpDir_dirFiles[FILENAME_SIZE] = { "dir /A:-D /-C" };
-    char* pathTemp = NULL;
+fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id: u16, current_directory: &str) -> Result<i32, std::io::Error> {
+    let mut tmp: String = String::new();
+    let mut tmp_directory: String = String::new();
+    let mut tmp_file: String = String::new();
+    let mut tmp_dir_directory: String = "dir /A:D /B".to_string();
+    let mut tmp_dir_files: String = "dir /A:-D /-C".to_string();
 
-    if client_id {
-        std::cout << "Client has requested the directory listing." << std::endl;
+    if client_id > 0 {
+        println!("Client has requested the directory listing.");
 
-        pathTemp = getenv("TEMP");
+        let path_temp = get_temp_directory();
 
-        sprintf(tmpDir, "%s\\%lu_tmpDir.txt", pathTemp, client_id);
-        sprintf(tmpDir_DIR, "%s\\%lu_tmpDir2.txt", pathTemp, client_id);
-        sprintf(tmpDir_FILE, "%s\\%lu_tmpDir3.txt", pathTemp, client_id);
+        tmp = format!("{}\\{}_tmp_dir.txt", path_temp, client_id).to_string();
+        tmp_directory = format!("{}\\{}_tmp_dir2.txt", path_temp, client_id).to_string();
+        tmp_file = format!("{}\\{}_tmp_dir3.txt", path_temp, client_id).to_string();
 
-        strcat(tmpDir_dirDirectory, " >");
-        strcat(tmpDir_dirDirectory, tmpDir_DIR);
+        tmp_dir_directory += " >";
+        tmp_dir_directory += &tmp_directory;
 
-        strcat(tmpDir_dirFiles, " >");
-        strcat(tmpDir_dirFiles, tmpDir_FILE);
+        tmp_dir_files += " >";
+        tmp_dir_files += &tmp_file;
 
-        char bufferForNewFileName[FILENAME_SIZE];
-        memset(&bufferForNewFileName, 0, FILENAME_SIZE);
+        let /* mut */ tmp_new_file_name: String;
 
-        if !g_convertKirillica {
-            strcpy(bufferForNewFileName, current_directory);
-        } else {
-            simple_conv(current_directory, strlen(current_directory), bufferForNewFileName, FILENAME_SIZE, true);
-        }
+        //if !g_convertKirillica {
+            //strcpy(tmp_new_file_name, current_directory);
+            tmp_new_file_name = current_directory.to_string();
+        //} else {
+        //    simple_conv(current_directory, strlen(current_directory), tmp_new_file_name, FILENAME_SIZE, true);
+        //}
 
         // Save directory information in temp file.
-        execute_system_command(tmpDir_dirDirectory, bufferForNewFileName);
+        if is_debug() {
+            println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_files, tmp_new_file_name);
+        }
+        execute_system_command(tmp_dir_files.as_str(), tmp_new_file_name.as_str());
 
         if is_debug() {
-            std::cout << "<<<DEBUG INFO>>>: " << tmpDir_dirDirectory << " " << bufferForNewFileName << std::endl;
+            println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_directory, tmp_new_file_name);
         }
+        execute_system_command(tmp_dir_directory.as_str(), tmp_new_file_name.as_str());
 
-        execute_system_command(tmpDir_dirFiles, bufferForNewFileName);
+        let one_second = time::Duration::from_secs(1);
+        thread::sleep(one_second);
 
-        if is_debug() {
-            std::cout << "<<<DEBUG INFO>>>: " << tmpDir_dirFiles << " " << bufferForNewFileName << std::endl;
-        }
+        let mut f_in_dir = File::create(tmp.as_str())?;
 
-        FILE *fInDIR = fopen(tmpDir, "w");
+        let f_in_directory = File::open(tmp_directory.as_str())?;
 
-        FILE *fInDirectory = fopen(tmpDir_DIR, "r");
+        let mut is_first = true;
 
-        char tmpBuffer[BUFFER_SIZE];
-        char tmpBufferDir[BUFFER_SIZE];
-        bool isFirst = true;
+        let reader_directory = BufReader::new(
+            DecodeReaderBytesBuilder::new()
+                .encoding(Some(WINDOWS_1251))
+                .build(f_in_directory));
 
-        while !feof(fInDirectory) {
-            memset(&tmpBuffer, 0, BUFFER_SIZE);
-            if NULL == fgets(tmpBuffer, BUFFER_SIZE, fInDirectory) {
-                break;
-            }
-            killLastCRLF(tmpBuffer);
-            memset(&tmpBufferDir, 0, BUFFER_SIZE);
-            strcpy(tmpBufferDir, "drw-rw-rw-    1 user       group        512 Oct 15  2024 ");
-            if !g_convertKirillica {
-                strcat(tmpBufferDir, tmpBuffer);
+        for line in reader_directory.lines() {
+            let line = line?;
+            let mut tmp_buffer_dir: String = "drw-rw-rw-    1 user       group        512 Oct 15  2024 ".to_string();
+            //if !g_convertKirillica {
+                //strcat(tmp_buffer_dir, tmpBuffer);
+                tmp_buffer_dir += &line;
+            //} else {
+            //    char tmp_new_file_name[FILENAME_SIZE];
+            //    simple_conv(tmpBuffer, strlen(tmpBuffer), tmp_new_file_name, FILENAME_SIZE, false);
+            //    strcat(tmp_buffer_dir, tmp_new_file_name);
+            //}
+            if !is_first {
+                let _ = f_in_dir.write_all("\n".as_bytes());
             } else {
-                char bufferForNewFileName[FILENAME_SIZE];
-                simple_conv(tmpBuffer, strlen(tmpBuffer), bufferForNewFileName, FILENAME_SIZE, false);
-                strcat(tmpBufferDir, bufferForNewFileName);
+                is_first = false;
             }
-            if !isFirst {
-                fputs("\n", fInDIR);
-            } else {
-                isFirst = false;
-            }
-            fputs(tmpBufferDir, fInDIR);
+            let _ = f_in_dir.write_all(tmp_buffer_dir.as_bytes());
             if is_debug() {
-                std::cout << tmpBufferDir << std::endl;
-            }
-            if ferror(fInDIR) {
-                break;
+                println!("{}", tmp_buffer_dir);
             }
         }
 
-        fclose(fInDirectory);
-
-        FILE *fInFiles = fopen(tmpDir_FILE, "r");
-
-        int skipLines = 5;
-        while !feof(fInFiles) && skipLines > 0 {
-            memset(&tmpBuffer, 0, BUFFER_SIZE);
-            if NULL == fgets(tmpBuffer, BUFFER_SIZE, fInFiles) {
-                break;
-            }
-            skipLines--;
+        let result = File::open(tmp_file.as_str());
+        let /* mut */ f_in_files;
+        match result {
+            Ok(f) => f_in_files = f,
+            Err(e) => panic!("{:?} '{}'", e, tmp_file)
         }
 
-        int iDay, iMonths, iYear, iHour, iMinute;
-        unsigned long ulFileSize;
-        char tmpFileName[FILENAME_SIZE];
-        char tmpBufferFile[FILENAME_SIZE];
+        let reader_files = BufReader::new(
+            DecodeReaderBytesBuilder::new()
+                .encoding(Some(WINDOWS_1251))
+                .build(f_in_files));
 
-        while !feof(fInFiles) {
-            memset(&tmpBuffer, 0, BUFFER_SIZE);
-            if NULL == fgets(tmpBuffer, BUFFER_SIZE, fInFiles) {
-                break;
+        let mut skip_lines = 5;
+        let mut tmp_file_name: String;
+        let mut tmp_buffer_file: String;
+
+        for line in reader_files.lines() {
+            if skip_lines > 0 {
+                skip_lines -= 1;
+                continue;
             }
-            if isNumerical(tmpBuffer[0])  {
-                memset(&tmpFileName, 0, FILENAME_SIZE);
-                sscanf(tmpBuffer, "%2d.%2d.%4d  %2d:%2d %17lu %*s", &iDay, &iMonths, &iYear, &iHour, &iMinute, &ulFileSize);
-                strcpy(tmpFileName, tmpBuffer + 36);
-                killLastCRLF(tmpFileName);
-                memset(&tmpBufferFile, 0, FILENAME_SIZE);
-                sprintf(tmpBufferFile, "-rw-rw-rw-    1 user       group %10lu %s %2d  %4d ", ulFileSize, g_sMonths[iMonths - 1], iDay, iYear);
-                if !g_convertKirillica  {
-                    strcat(tmpBufferFile, tmpFileName);
+
+            let line = line.unwrap();
+
+            if is_numerical(line.chars().next().unwrap() as u8) {
+                //sscanf(tmpBuffer, "%2d.%2d.%4d  %2d:%2d %17lu %*s", &iDay, &iMonths, &iYear, &iHour, &iMinute, &ulFileSize);
+
+                let v: Vec<&str> = line.split_whitespace().collect();
+                let tmp_date = v[0];
+
+                let i_day = (tmp_date[0..=1]).to_string().parse::<u8>().unwrap();
+                let i_month = (tmp_date[3..=4]).to_string().parse::<usize>().unwrap();
+                let i_year = (tmp_date[6..=9]).to_string().parse::<u16>().unwrap();
+
+                //let tmp_time = v[1];
+                //let _i_hour = sscanf!(&tmp_time[12..13]).unwrap();
+                //let _i_minute = sscanf!(&tmp_time[15..16]).unwrap();
+
+                let tmp_file_size = v[2];
+                let file_size: usize = tmp_file_size.parse::<usize>().unwrap();
+
+                tmp_file_name = line[36..].to_string();
+
+                tmp_buffer_file = format!("-rw-rw-rw-    1 user       group {:10} {} {:02}  {:04} ", file_size, MONTHS[i_month - 1], i_day, i_year).to_string();
+                //if !g_convertKirillica  {
+                    //strcat(tmp_buffer_file, tmp_file_name);
+                    tmp_buffer_file += &tmp_file_name;
+                //} else {
+                //    char tmp_new_file_name[FILENAME_SIZE];
+                //    simple_conv(tmp_file_name, strlen(tmp_file_name), tmp_new_file_name, FILENAME_SIZE, false);
+                //    strcat(tmp_buffer_file, tmp_new_file_name);
+                //}
+                if !is_first {
+                    let _ = f_in_dir.write_all("\n".as_bytes());
                 } else {
-                    char bufferForNewFileName[FILENAME_SIZE];
-                    simple_conv(tmpFileName, strlen(tmpFileName), bufferForNewFileName, FILENAME_SIZE, false);
-                    strcat(tmpBufferFile, bufferForNewFileName);
+                    is_first = false;
                 }
-                if !isFirst {
-                    fputs("\n", fInDIR);
-                } else {
-                    isFirst = false;
-                }
-                fputs(tmpBufferFile, fInDIR);
+                let _ = f_in_dir.write_all(tmp_buffer_file.as_bytes());
                 if is_debug() {
-                    std::cout << tmpBufferFile << std::endl;
-                }
-                if ferror(fInDIR) {
-                    break;
+                    println!("{}", tmp_buffer_file);
                 }
             }
         }
 
-        fclose(fInFiles);
-
-        fclose(fInDIR);
+        let _ = f_in_dir.write_all("\n".as_bytes());
     } else {
-        std::cout << "Client has requested to retrieve the file: \"" << fileName << "\"." << std::endl;
+        println!("Client has requested to retrieve the file: \"{}\".", file_name);
     }
 
-    char send_buffer[BUFFER_SIZE];
-    memset(&send_buffer, 0, BUFFER_SIZE);
+    //let /* mut */ send_buffer: String;
+    let mut file_name_for_open: String;
 
-    FILE *fIn = NULL;
-
-    if client_id {
-        fIn = fopen(fileName, "rb");
+    if client_id > 0 {
+        file_name_for_open = tmp.clone();
     } else {
-        char fileNameFull[FILENAME_SIZE];
-        memset(&fileNameFull, 0, FILENAME_SIZE);
+        file_name_for_open = current_directory.to_string();
 
-        strcpy(fileNameFull, current_directory);
-
-        if strlen(fileNameFull) > 0 {
-            strcat(fileNameFull, "\\");
+        if file_name_for_open.len() > 0 {
+            file_name_for_open += "\\";
         }
-        strcat(fileNameFull, fileName);
 
-        if !g_convertKirillica {
-            fIn = fopen(fileNameFull, "rb");
-        } else {
-            char bufferForNewFileName[FILENAME_SIZE];
-            simple_conv(fileNameFull, strlen(fileNameFull), bufferForNewFileName, FILENAME_SIZE, true);
-            fIn = fopen(bufferForNewFileName, "rb");
-        }
+        file_name_for_open += file_name;
+
+        //if !g_convertKirillica {
+        //    f_in = fopen(fileNameFull, "rb");
+        //} else {
+        //    char tmp_new_file_name[FILENAME_SIZE];
+        //    simple_conv(fileNameFull, strlen(fileNameFull), tmp_new_file_name, FILENAME_SIZE, true);
+        //    f_in = fopen(tmp_new_file_name, "rb");
+        //}
     }
 
-    if fIn == NULL {
+    let mut f_in = File::open(file_name_for_open.as_str())?;
+
+    /*if f_in == NULL {
         std::cout << "The file: \"" << fileName << "\" does not exist." << std::endl;
 
         sprintf(send_buffer, "550 File name invalid.\r\n");
@@ -808,98 +787,115 @@ fn send_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, client_id: 
         }
 
         return -1;
-    } else {
-        sprintf(send_buffer, "150 Data connection ready. \r\n");
-        int bytes = send(s, send_buffer, strlen(send_buffer), 0);
+    } else {*/
+    /*
+        send_buffer = "150 Data connection ready.\r\n".to_string();
+        let bytes = match s.write_all(send_buffer.as_bytes()) {
+            Ok(()) => send_buffer.len(),
+            Err(_) => 0,
+        };
 
         if is_debug() {
-            std::cout << "---> " << send_buffer;
+            print!("---> {}", send_buffer);
         }
 
-        if bytes < 0 {
-            fclose(fIn);
-
-            if client_id {
+        if bytes != send_buffer.len() {
+    */
+        if !send_message(s, "150 Data connection ready.\r\n") {
+            if client_id > 0 {
                 if !is_debug() {
-                    execute_system_command(systemCommandDEL, tmpDir);
-                    execute_system_command(systemCommandDEL, tmpDir_DIR);
-                    execute_system_command(systemCommandDEL, tmpDir_FILE);
+                    execute_system_command(SYSTEM_COMMAND_DEL, tmp.as_str());
+                    execute_system_command(SYSTEM_COMMAND_DEL, tmp_directory.as_str());
+                    execute_system_command(SYSTEM_COMMAND_DEL, tmp_file.as_str());
                 }    
             }
 
-            return 0;
+            return Ok(0);
         }
-    }
+    //}
 
-    char tempBuffer[BIG_BUFFER_SIZE + 1];
+    let mut temp_buffer = [0; BIG_BUFFER_SIZE];
+    let mut send_to;
 
-    while !feof(fIn) {
-        size_t result = fread(tempBuffer, 1, BIG_BUFFER_SIZE, fIn);
+    send_to = TcpStream::connect(connect_to.as_str()).unwrap();
 
-        // send buffer to client
-        size_t sent = 0;
-        while sent < result {
-            int n = send(sDataActive, tempBuffer + sent, result - sent, 0);
+    loop {
+        let result = f_in.read(&mut temp_buffer[..])?;
 
-            if (n == -1) {
-                fclose(fIn);
+        if result == 0 {
+            break;
+        }
 
-                if client_id {
-                    if !is_debug() {
-                        execute_system_command(systemCommandDEL, tmpDir);
-                        execute_system_command(systemCommandDEL, tmpDir_DIR);
-                        execute_system_command(systemCommandDEL, tmpDir_FILE);
-                    }
+        //let bytes = match *sDataActive.write_all(vec!(temp_buffer[..result])) {
+        //let _ = send_to.write_all(&temp_buffer[..result]);
+        let bytes = match send_to.write_all(&temp_buffer[..result]) {
+            Ok(()) => result,
+            Err(_) => 0,
+        };
+        if bytes != result {
+            if client_id > 0 {
+                if !is_debug() {
+                    execute_system_command(SYSTEM_COMMAND_DEL, tmp.as_str());
+                    execute_system_command(SYSTEM_COMMAND_DEL, tmp_directory.as_str());
+                    execute_system_command(SYSTEM_COMMAND_DEL, tmp_file.as_str());
                 }
-
-                return 0;
             }
-
-            sent += n;
+            return Ok(0);
         }
     }
 
-    fclose(fIn);
-
-    if client_id  {
+    if client_id > 0 {
         if !is_debug() {
-            execute_system_command(systemCommandDEL, tmpDir);
-            execute_system_command(systemCommandDEL, tmpDir_DIR);
-            execute_system_command(systemCommandDEL, tmpDir_FILE);
+            execute_system_command(SYSTEM_COMMAND_DEL, tmp.as_str());
+            execute_system_command(SYSTEM_COMMAND_DEL, tmp_directory.as_str());
+            execute_system_command(SYSTEM_COMMAND_DEL, tmp_file.as_str());
         }
     }
 
-    std::cout << "File sent successfully."<< std::endl;
+    println!("File sent successfully.");
 
-    return 1;
+    Ok(1)
 }
 
 // return '0' if not have error.
-fn execute_system_command(commandNameWithKeys: &str, fileName: &str) -> i32 {
-    char executeCommand[FILENAME_SIZE];
-    memset(&executeCommand, 0, FILENAME_SIZE);
+fn execute_system_command(command_name_with_keys: &str, file_name: &str) -> i32 {
+    use std::os::windows::process::CommandExt;
 
-    strcpy(executeCommand, commandNameWithKeys);
+    let mut cmd_args = String::new();
 
-    strcat(executeCommand, " ");
-
-    if NULL != strchr(fileName, ' ') {
-        strcat(executeCommand, "\"");
+    let all_args = command_name_with_keys.split(" ");
+    let mut is_first = true;
+    for arg in all_args {
+        if is_first {
+            cmd_args = arg.to_string();
+            is_first = false;
+        } else {
+            cmd_args.push_str(" ");
+            cmd_args.push_str(arg);
+        }
     }
 
-    strcat(executeCommand, fileName);
-
-    if NULL != strchr(fileName, ' ') {
-        strcat(executeCommand, "\"");
+    if file_name.len() > 0 {
+        cmd_args.push_str(" ");
+        cmd_args.push_str(file_name);
     }
 
     if is_debug() {
-        std::cout << "Execute command: " << executeCommand << std::endl;
+        println!("Execute command: {}", cmd_args);
     }
 
-    return system(executeCommand);
-}
+    let status = Command::new("cmd.exe")
+            .arg("/C")
+            .raw_arg(&format!("\"{cmd_args}\""))
+            .status()
+            .expect("command failed to start");
 
+    match status.code() {
+        Some(code) => code,
+        None => -1
+    }
+}
+/*
 // Client sent RETR command, returns false if fails.
 fn command_retrieve(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &str, current_directory: &str) -> bool {
     char fileName[FILENAME_SIZE];
@@ -1023,16 +1019,24 @@ fn receive_file_contents(sDataActive: &TcpStream, receive_buffer: &str, sizeBuff
 
     true
 }
-
+*/
 // Client sent CWD command, returns false if connection ended.
-fn command_change_working_directory(s: &TcpStream, receive_buffer: &str, current_directory: &str) -> bool {
-    remove_command(receive_buffer, current_directory);
+fn command_change_working_directory(s: &TcpStream, receive_buffer: &mut Vec<u8>, current_directory: &mut String) -> bool {
+    let mut tmp = Vec::new();
 
-    replace_backslash(current_directory);
+    remove_command(receive_buffer, &mut tmp, 4);
+
+    replace_backslash(&mut tmp);
+
+    *current_directory = String::from_utf8_lossy(&tmp[0..]).to_string();
+
+    if current_directory == "\\" {
+        *current_directory = "".to_string();
+    }
 
     send_message(s, "250 Directory successfully changed.\r\n")
 }
-
+/*
 // Client sent DELETE command, returns false if connection ended.
 fn command_delete(s: &TcpStream, receive_buffer: &str) -> bool {
     char fileName[FILENAME_SIZE];
@@ -1138,21 +1142,22 @@ fn command_type(s: &TcpStream, receive_buffer: &str) -> bool {
 fn command_feat(s: &TcpStream) -> bool {
     send_message(s, "211-Extensions supported\r\n UTF8\r\n211 end\r\n")
 }
-
+*/
 // Client sent OPTS command, returns false if connection ended.
-fn command_opts(s: &TcpStream, receive_buffer: &str) -> bool {
-    char optsName[BUFFER_SIZE];
-    memset(&optsName, 0, BUFFER_SIZE);
+fn command_opts(s: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
+    let mut tmp = Vec::new();
 
-    remove_command(receive_buffer, optsName);
+    remove_command(receive_buffer, &mut tmp, 4);
+    
+    let opts_name = String::from_utf8_lossy(&tmp[0..]);
 
-    if strncmp(optsName, "UTF8 ON", 8) == 0 {
+    if opts_name == "UTF8 ON" {
         return send_message(s, "200 UTF8 ON.\r\n");
     } else {
         return send_argument_syntax_error(s);
     }
 }
-
+/*
 // Client sent RNFR command, returns false if connection ended.
 fn command_rename_from(s: &TcpStream, receive_buffer: &str, name_file_for_rename: &str) -> bool {
     name_file_for_rename[0] = '\0';
@@ -1301,19 +1306,19 @@ fn kill_last_cr_lf(buffer: &str) {
         buffer[strlen(buffer) - 1] = 0;
     }
 }
-
+*/
 // Replace '/' to '\' for Windows
-fn replace_backslash(buffer: &str) {
-    size_t i = 0;
-    size_t length = strlen(buffer);
+fn replace_backslash(buffer: &mut Vec<u8>) {
+    let mut i: usize = 0;
 
-    for (; i < length; i++) {
-        if '/' == buffer[i] {
-            buffer[i] = '\\';
+    while i < buffer.len() {
+        if '/' as u8 == buffer[i] {
+            buffer[i] = '\\' as u8;
         }
+        i += 1;
     }
 }
-
+/*
 // Converting kirillic characters between Android and Windows 7
 fn simple_conv(inString: &str, inLen: i32, outString: &str, outMaxLen: i32, tudaSuda: bool) {
     const ALL_SYMBOLS_FOR_CONVERT = (31 + 31 + 4 + 1);
