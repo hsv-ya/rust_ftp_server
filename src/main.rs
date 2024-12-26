@@ -248,7 +248,7 @@ fn communicate_with_client(s: &mut TcpStream, connect_to: &mut String, authroise
         success = command_port(s, connect_to, &mut receive_buffer);
     }
 
-    else if maybe_command == "LIST" {
+    else if maybe_command == "LIST" || maybe_command == "NLST" {
         success = command_list(s, connect_to, client_id, current_directory);
     }
 /*
@@ -275,15 +275,15 @@ fn communicate_with_client(s: &mut TcpStream, connect_to: &mut String, authroise
     else if maybe_command == "RMD " {
         success = command_delete_directory(s, receive_buffer);
     }
-
+*/
     else if maybe_command == "TYPE" {
-        success = command_type(s, receive_buffer);
+        success = command_type(s, &mut receive_buffer);
     }
 
     else if maybe_command == "FEAT" {
         success = command_feat(s);
     }
-*/
+
     else if maybe_command == "OPTS" {
         success = command_opts(s, &mut receive_buffer);
     }
@@ -788,19 +788,6 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
 
         return -1;
     } else {*/
-    /*
-        send_buffer = "150 Data connection ready.\r\n".to_string();
-        let bytes = match s.write_all(send_buffer.as_bytes()) {
-            Ok(()) => send_buffer.len(),
-            Err(_) => 0,
-        };
-
-        if is_debug() {
-            print!("---> {}", send_buffer);
-        }
-
-        if bytes != send_buffer.len() {
-    */
         if !send_message(s, "150 Data connection ready.\r\n") {
             if client_id > 0 {
                 if !is_debug() {
@@ -826,8 +813,6 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
             break;
         }
 
-        //let bytes = match *sDataActive.write_all(vec!(temp_buffer[..result])) {
-        //let _ = send_to.write_all(&temp_buffer[..result]);
         let bytes = match send_to.write_all(&temp_buffer[..result]) {
             Ok(()) => result,
             Err(_) => 0,
@@ -1122,33 +1107,31 @@ fn command_delete_directory(s: &TcpStream, receive_buffer: &str) -> bool {
 
     send_message(s, "250 Requested file action okay, completed.\r\n")
 }
-
+*/
 // Client sent TYPE command, returns false if connection ended.
-fn command_type(s: &TcpStream, receive_buffer: &str) -> bool {
-    char typeName[BUFFER_SIZE];
-    memset(&typeName, 0, BUFFER_SIZE);
+fn command_type(s: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
+    let mut tmp = Vec::new();
 
-    remove_command(receive_buffer, typeName);
+    remove_command(receive_buffer, &mut tmp, 4);
 
-    char send_buffer[BUFFER_SIZE];
-    memset(&send_buffer, 0, BUFFER_SIZE);
+    let type_name = String::from_utf8_lossy(&tmp[0..]);
 
-    sprintf(send_buffer, "200 Type set to %s.\r\n", typeName);
+    let send_buffer = format!("200 Type set to {}.\r\n", type_name);
 
-    send_message(s, send_buffer)
+    send_message(s, &send_buffer)
 }
 
 // Client sent FEAT command, returns false if fails.
 fn command_feat(s: &TcpStream) -> bool {
     send_message(s, "211-Extensions supported\r\n UTF8\r\n211 end\r\n")
 }
-*/
+
 // Client sent OPTS command, returns false if connection ended.
 fn command_opts(s: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
     let mut tmp = Vec::new();
 
     remove_command(receive_buffer, &mut tmp, 4);
-    
+
     let opts_name = String::from_utf8_lossy(&tmp[0..]);
 
     if opts_name == "UTF8 ON" {
