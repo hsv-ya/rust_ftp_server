@@ -16,7 +16,7 @@
 
 use std::env;
 use std::net::{TcpListener, TcpStream, SocketAddr, ToSocketAddrs};
-use std::io::{self, Write, Read/*, BufRead, BufReader*/};
+use std::io::{self, Write, Read};
 use std::thread;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::fs::File;
@@ -36,8 +36,6 @@ static SHOW_DEBUG_MESSAGE: AtomicBool = AtomicBool::new(false);
 static CONVERT_CYRILLIC: AtomicBool = AtomicBool::new(false);
 
 const DEFAULT_PORT: &str = "21";
-//const BUFFER_SIZE: usize = 1024;
-//const FILENAME_SIZE: usize = 1024;
 const BIG_BUFFER_SIZE: usize = 65535;
 
 
