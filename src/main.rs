@@ -33,7 +33,7 @@ const SYSTEM_COMMAND_DEL: &str = "del";
 //const SYSTEM_COMMAND_RENAME: &str = "rename";
 
 static SHOW_DEBUG_MESSAGE: AtomicBool = AtomicBool::new(false);
-static mut CONVERT_CYRILLIC: bool = false;
+static CONVERT_CYRILLIC: AtomicBool = AtomicBool::new(false);
 
 const DEFAULT_PORT: &str = "21";
 //const BUFFER_SIZE: usize = 1024;
@@ -102,13 +102,11 @@ fn debug_mode(argc: usize, argv: &[String]) -> bool {
 }
 
 fn set_convert_cyrillic(b: bool) {
-    unsafe { CONVERT_CYRILLIC = b; }
+    CONVERT_CYRILLIC.store(b, Ordering::Relaxed);
 }
 
 fn is_convert_cyrillic() -> bool {
-    let b: bool;
-    unsafe { b = CONVERT_CYRILLIC; }
-    return b
+    CONVERT_CYRILLIC.load(Ordering::Relaxed)
 }
 
 // Returns true if user indicated that convert cyrillic should be on.
@@ -507,8 +505,8 @@ fn send_argument_syntax_error(s: &TcpStream) -> bool {
         writeln!(s, message_error).unwrap();
     }
     Err(io::Error::new(io::ErrorKind::InvalidInput, message_error))
-}*/
-/*
+}
+
 // Gets the servers address information based on arguments.
 fn get_client_address_info_active(s: &TcpStream, ip_buffer: &str, port_buffer: &str) -> Result<SocketAddr, String> {
     let hints = libc::addrinfo {
@@ -1520,8 +1518,7 @@ fn simple_conv(in_string: Vec<u8>, out_string: &mut Vec<u8>, tuda_suda: bool) {
                 q += 1;
             }
 
-            if is_found {
-            } else {
+            if !is_found {
                 let mut is_found2 = false;
                 let mut q = ALL_SYMBOLS_FOR_CONVERT - 1;
 
@@ -1536,8 +1533,7 @@ fn simple_conv(in_string: Vec<u8>, out_string: &mut Vec<u8>, tuda_suda: bool) {
                     q += 1;
                 }
 
-                if is_found2 {
-                } else {
+                if !is_found2 {
                     out_string.push(in_string[i]);
                 }
             }
