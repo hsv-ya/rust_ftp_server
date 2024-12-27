@@ -22,9 +22,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::fs::File;
 use std::process::Command;
 
-//use encoding_rs::WINDOWS_1251;
-//use encoding_rs_io::DecodeReaderBytesBuilder;
-
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
@@ -632,33 +629,17 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
         tmp_dir_files += " >";
         tmp_dir_files += &tmp_file;
 
-        //let mut tmp_new_file_name: String;
-
-        /*if !is_convert_cyrillic() {
-            //strcpy(tmp_new_file_name, current_directory);
-            tmp_new_file_name = current_directory.to_string();
-        } else {
-            let mut tmp_new_file_name_vec: Vec<u8> = Vec::new();
-            simple_conv(current_directory.as_bytes().to_vec(), &mut tmp_new_file_name_vec, true);
-            //tmp_new_file_name = String::from_utf8_lossy(&tmp_new_file_name_vec[0..]).to_string();
-            tmp_new_file_name = String::from_utf8_uncheched(&tmp_new_file_name_vec[0..]).to_string();
-            //tmp_new_file_name = tmp_new_file_name_vec.to_str();
-        }*/
-        //tmp_new_file_name = current_directory.to_string();
-
         // Save directory information in temp file.
         if is_debug() {
-            //println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_files, tmp_new_file_name);
             println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_files, current_directory);
         }
-        //execute_system_command(tmp_dir_files.as_str(), tmp_new_file_name.as_str());
+
         execute_system_command(tmp_dir_files.as_str(), current_directory);
 
         if is_debug() {
-            //println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_directory, tmp_new_file_name);
             println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_directory, current_directory);
         }
-        //execute_system_command(tmp_dir_directory.as_str(), tmp_new_file_name.as_str());
+
         execute_system_command(tmp_dir_directory.as_str(), current_directory);
 
         let one_second = time::Duration::from_secs(1);
@@ -670,29 +651,20 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
 
         let mut is_first = true;
 
-        //for line in reader_directory.lines() {
         let mut buffer: Vec<u8> = Vec::new();
-        //let mut cursor = io::Cursor::new(f_in_directory);
-        //while reader_directory.read_until(0x0A as u8, &mut buffer).unwrap() > 0 {
+
         for iter in f_in_directory.bytes() {
             let byte = iter.unwrap();
             if byte == b'\r' {
                 continue;
             } else if byte == b'\n' {
-                //let line = line?;
                 let mut tmp_buffer_dir: String = "drw-rw-rw-    1 user       group        512 Oct 15  2024 ".to_string();
                 if !is_convert_cyrillic() {
-                    //strcat(tmp_buffer_dir, tmpBuffer);
                     let line = String::from_utf8_lossy(&buffer[0..]);
                     tmp_buffer_dir += &line;
                 } else {
-                    //char tmp_new_file_name[FILENAME_SIZE];
-                    //simple_conv(tmpBuffer, strlen(tmpBuffer), tmp_new_file_name, FILENAME_SIZE, false);
                     let mut tmp_new_file_name: Vec<u8> = Vec::new();
-                    //let from_line = line.as_bytes().to_vec();
-                    //simple_conv(from_line, &mut tmp_new_file_name, false);
                     simple_conv(buffer.clone(), &mut tmp_new_file_name, false);
-                    //strcat(tmp_buffer_dir, tmp_new_file_name);
                     let str_tmp_new_file_name = String::from_utf8_lossy(&tmp_new_file_name[0..]);//.to_string().as_str();
                     tmp_buffer_dir += &str_tmp_new_file_name;
                 }
@@ -712,7 +684,7 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
         }
 
         let result = File::open(tmp_file.as_str());
-        let /* mut */ f_in_files;
+        let f_in_files;
         match result {
             Ok(f) => f_in_files = f,
             Err(e) => panic!("{:?} '{}'", e, tmp_file)
@@ -733,9 +705,7 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
                     continue;
                 }
 
-                //if is_numerical(line.chars().next().unwrap() as u8) {
                 if is_numerical(buffer[0]) {
-                    //sscanf(tmpBuffer, "%2d.%2d.%4d  %2d:%2d %17lu %*s", &iDay, &iMonths, &iYear, &iHour, &iMinute, &ulFileSize);
                     let line = String::from_utf8_lossy(&buffer[0..36]);
 
                     let v: Vec<&str> = line.split_whitespace().collect();
@@ -752,19 +722,15 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
                     let tmp_file_size = v[2];
                     let file_size: usize = tmp_file_size.parse::<usize>().unwrap();
 
-                    //tmp_file_name = line[36..].to_string();
                     let tmp_file_name_vec: Vec<u8> = (&buffer[36..]).into();
 
                     tmp_buffer_file = format!("-rw-rw-rw-    1 user       group {:10} {} {:02}  {:04} ", file_size, MONTHS[i_month - 1], i_day, i_year).to_string();
                     if !is_convert_cyrillic() {
-                        //strcat(tmp_buffer_file, tmp_file_name);
                         tmp_file_name = line[36..].to_string();
                         tmp_buffer_file += &tmp_file_name;
                     } else {
-                        //char tmp_new_file_name[FILENAME_SIZE];
                         let mut tmp_new_file_name_vec: Vec<u8> = Vec::new();
                         simple_conv(tmp_file_name_vec, &mut tmp_new_file_name_vec, false);
-                        //strcat(tmp_buffer_file, tmp_new_file_name);
                         let tmp_new_file_name = String::from_utf8_lossy(&tmp_new_file_name_vec[0..]);
                         tmp_buffer_file += &tmp_new_file_name;
                     }
@@ -789,7 +755,6 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
         println!("Client has requested to retrieve the file: \"{}\".", file_name);
     }
 
-    //let /* mut */ send_buffer: String;
     let mut file_name_for_open: String;
 
     if client_id > 0 {
@@ -1322,16 +1287,7 @@ fn close_client_connection(s: &TcpStream) {
 
     println!("Disconnected from client.");
 }
-/*
-// Delete <CR> and <LF> in end of string.
-fn kill_last_cr_lf(buffer: &str) {
-    while 0 < strlen(buffer) && 
-         ('\r' == buffer[strlen(buffer) - 1] ||
-          '\n' == buffer[strlen(buffer) - 1]) {
-        buffer[strlen(buffer) - 1] = 0;
-    }
-}
-*/
+
 // Replace '/' to '\' for Windows
 fn replace_backslash(buffer: &mut Vec<u8>) {
     let mut i: usize = 0;
@@ -1496,7 +1452,6 @@ fn simple_conv(in_string: Vec<u8>, out_string: &mut Vec<u8>, tuda_suda: bool) {
         [0xe2, 0x84, 0x96, 0xfc] // N
     ];
 
-    //let mut pos: usize = 0;
     let in_len = in_string.len();
 
     if is_debug() {
@@ -1516,7 +1471,6 @@ fn simple_conv(in_string: Vec<u8>, out_string: &mut Vec<u8>, tuda_suda: bool) {
 
                 while q < ALL_SYMBOLS_FOR_CONVERT - 1 {
                     if TABLE_FOR_CONVERT_TUDA[q][0] == in_string[i] && TABLE_FOR_CONVERT_TUDA[q][1] == in_string[i + 1] {
-                        //out_string[pos] = TABLE_FOR_CONVERT_TUDA[q][2];
                         out_string.push(TABLE_FOR_CONVERT_TUDA[q][2]);
                         is_found = true;
                         break;
@@ -1526,7 +1480,6 @@ fn simple_conv(in_string: Vec<u8>, out_string: &mut Vec<u8>, tuda_suda: bool) {
                 }
 
                 if is_found {
-                    //pos += 1;
                     i += 1;
                 }
             } else if b'\xe2' == in_string[i] {
@@ -1535,7 +1488,6 @@ fn simple_conv(in_string: Vec<u8>, out_string: &mut Vec<u8>, tuda_suda: bool) {
 
                 while q < ALL_SYMBOLS_FOR_CONVERT {
                     if TABLE_FOR_CONVERT_TUDA[q][0] == in_string[i] && TABLE_FOR_CONVERT_TUDA[q][1] == in_string[i + 1] && TABLE_FOR_CONVERT_TUDA[q][2] == in_string[i + 2] {
-                        //out_string[pos] = TABLE_FOR_CONVERT_TUDA[q][3];
                         out_string.push(TABLE_FOR_CONVERT_TUDA[q][3]);
                         is_found = true;
                         break;
@@ -1545,13 +1497,10 @@ fn simple_conv(in_string: Vec<u8>, out_string: &mut Vec<u8>, tuda_suda: bool) {
                 }
 
                 if is_found {
-                    //pos += 1;
                     i += 2;
                 }
             } else {
-                //out_string[pos] = in_string[i];
                 out_string.push(in_string[i]);
-                //pos += 1;
             }
 
             i += 1;
@@ -1563,9 +1512,7 @@ fn simple_conv(in_string: Vec<u8>, out_string: &mut Vec<u8>, tuda_suda: bool) {
 
             while q < ALL_SYMBOLS_FOR_CONVERT - 1 {
                 if TABLE_FOR_CONVERT_SUDA[q][2] == in_string[i] {
-                    //out_string[pos] = TABLE_FOR_CONVERT_SUDA[q][0];
                     out_string.push(TABLE_FOR_CONVERT_SUDA[q][0]);
-                    //out_string[pos + 1] = TABLE_FOR_CONVERT_SUDA[q][1];
                     out_string.push(TABLE_FOR_CONVERT_SUDA[q][1]);
                     is_found = true;
                     break;
@@ -1574,18 +1521,14 @@ fn simple_conv(in_string: Vec<u8>, out_string: &mut Vec<u8>, tuda_suda: bool) {
             }
 
             if is_found {
-                //pos += 1;
             } else {
                 let mut is_found2 = false;
                 let mut q = ALL_SYMBOLS_FOR_CONVERT - 1;
 
                 while q < ALL_SYMBOLS_FOR_CONVERT {
                     if TABLE_FOR_CONVERT_SUDA[q][3] == in_string[i] {
-                        //out_string[pos] = TABLE_FOR_CONVERT_SUDA[q][0];
                         out_string.push(TABLE_FOR_CONVERT_SUDA[q][0]);
-                        //out_string[pos + 1] = TABLE_FOR_CONVERT_SUDA[q][1];
                         out_string.push(TABLE_FOR_CONVERT_SUDA[q][1]);
-                        //out_string[pos + 2] = TABLE_FOR_CONVERT_SUDA[q][2];
                         out_string.push(TABLE_FOR_CONVERT_SUDA[q][2]);
                         is_found2 = true;
                         break;
@@ -1594,14 +1537,11 @@ fn simple_conv(in_string: Vec<u8>, out_string: &mut Vec<u8>, tuda_suda: bool) {
                 }
 
                 if is_found2 {
-                    //pos += 2;
                 } else {
-                    //out_string[pos] = in_string[i];
                     out_string.push(in_string[i]);
                 }
             }
 
-            //pos += 1;
             i += 1;
         }
     }
