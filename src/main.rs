@@ -28,8 +28,8 @@ const MONTHS: [&str; 12] = [
 ];
 
 const SYSTEM_COMMAND_DEL: &str = "del";
-//const SYSTEM_COMMAND_MKDIR: &str = "mkdir";
-//const SYSTEM_COMMAND_RMDIR: &str = "rmdir";
+const SYSTEM_COMMAND_MKDIR: &str = "mkdir";
+const SYSTEM_COMMAND_RMDIR: &str = "rmdir";
 //const SYSTEM_COMMAND_RENAME: &str = "rename";
 
 static SHOW_DEBUG_MESSAGE: AtomicBool = AtomicBool::new(false);
@@ -268,19 +268,19 @@ fn communicate_with_client(s: &mut TcpStream, connect_to: &mut String, authroise
     else if maybe_command == "CWD " {
         success = command_change_working_directory(s, &mut receive_buffer, current_directory);
     }
-/*
+
     else if maybe_command == "DELE" {
-        success = command_delete(s, receive_buffer);
+        success = command_delete(s, &mut receive_buffer);
     }
 
     else if maybe_command == "MKD " {
-        success = command_make_directory(s, receive_buffer, current_directory);
+        success = command_make_directory(s, &mut receive_buffer);
     }
 
     else if maybe_command == "RMD " {
-        success = command_delete_directory(s, receive_buffer);
+        success = command_delete_directory(s, &mut receive_buffer);
     }
-*/
+
     else if maybe_command == "TYPE" {
         success = command_type(s, &mut receive_buffer);
     }
@@ -866,7 +866,13 @@ fn execute_system_command(command_name_with_keys: &str, file_name: &str) -> i32 
 
     if file_name.len() > 0 {
         cmd_args.push_str(" ");
+        if file_name.contains(" ") {
+            cmd_args.push_str("\"");
+        }
         cmd_args.push_str(file_name);
+        if file_name.contains(" ") {
+            cmd_args.push_str("\"");
+        }
     }
 
     if is_debug() {
@@ -1010,13 +1016,13 @@ fn receive_file_contents(sDataActive: &TcpStream, receive_buffer: &str, sizeBuff
 */
 // Client sent CWD command, returns false if connection ended.
 fn command_change_working_directory(s: &TcpStream, receive_buffer: &mut Vec<u8>, current_directory: &mut String) -> bool {
-    let mut tmp = Vec::new();
+    let mut tmp_vec = Vec::new();
 
-    remove_command(receive_buffer, &mut tmp, 4);
+    remove_command(receive_buffer, &mut tmp_vec, 4);
 
-    replace_backslash(&mut tmp);
+    replace_backslash(&mut tmp_vec);
 
-    *current_directory = String::from_utf8_lossy(&tmp[0..]).to_string();
+    *current_directory = String::from_utf8_lossy(&tmp_vec[0..]).to_string();
 
     if current_directory == "\\" {
         *current_directory = "".to_string();
@@ -1024,93 +1030,66 @@ fn command_change_working_directory(s: &TcpStream, receive_buffer: &mut Vec<u8>,
 
     send_message(s, "250 Directory successfully changed.\r\n")
 }
-/*
+
 // Client sent DELETE command, returns false if connection ended.
-fn command_delete(s: &TcpStream, receive_buffer: &str) -> bool {
-    char fileName[FILENAME_SIZE];
-    memset(&fileName, 0, FILENAME_SIZE);
+fn command_delete(s: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
+    let mut tmp_vec = Vec::new();
 
-    remove_command(receive_buffer, fileName, 5);
+    remove_command(receive_buffer, &mut tmp_vec, 5);
 
-    replace_backslash(fileName);
+    replace_backslash(&mut tmp_vec);
 
-    char bufferForNewName[FILENAME_SIZE];
-    memset(&bufferForNewName, 0, FILENAME_SIZE);
+    let tmp = String::from_utf8_lossy(&tmp_vec[0..]).to_string();
 
-    if !is_convert_cyrillic() {
-        strcpy(bufferForNewName, fileName);
-    } else {
-        simple_conv(fileName, strlen(fileName), bufferForNewName, FILENAME_SIZE, true);
-    }
-
-    execute_system_command(systemCommandDEL, bufferForNewName);
+    execute_system_command(SYSTEM_COMMAND_DEL, tmp.as_str());
 
     if is_debug() {
-        std::cout << "<<<DEBUG INFO>>>: " << systemCommandDEL << " " << fileName << std::endl;
+        println!("<<<DEBUG INFO>>>: {} {}", SYSTEM_COMMAND_DEL, tmp);
     }
 
     send_message(s, "250 Requested file action okay, completed.\r\n")
 }
 
 // Client sent MKD command, returns false if connection ended.
-fn command_make_directory(s: &TcpStream, receive_buffer: &str, current_directory: &str) -> bool {
-    char directoryName[FILENAME_SIZE];
-    memset(&directoryName, 0, FILENAME_SIZE);
+fn command_make_directory(s: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
+    let mut tmp_vec = Vec::new();
 
-    remove_command(receive_buffer, directoryName);
+    remove_command(receive_buffer, &mut tmp_vec, 4);
 
-    replace_backslash(directoryName);
+    replace_backslash(&mut tmp_vec);
 
-    char bufferForNewName[FILENAME_SIZE];
-    memset(&bufferForNewName, 0, FILENAME_SIZE);
+    let tmp = String::from_utf8_lossy(&tmp_vec[0..]).to_string();
 
-    if !is_convert_cyrillic() {
-        strcpy(bufferForNewName, directoryName);
-    } else {
-        simple_conv(directoryName, strlen(directoryName), bufferForNewName, FILENAME_SIZE, true);
-    }
-
-    execute_system_command(systemCommandMKDIR, bufferForNewName);
+    execute_system_command(SYSTEM_COMMAND_MKDIR, tmp.as_str());
 
     if is_debug() {
-        std::cout << "<<<DEBUG INFO>>>: " << systemCommandMKDIR << " " << directoryName << std::endl;
+        println!("<<<DEBUG INFO>>>: {} {}", SYSTEM_COMMAND_MKDIR, tmp);
     }
 
-    char send_buffer[BUFFER_SIZE];
-    memset(&send_buffer, 0, BUFFER_SIZE);
+    let send_buffer = format!("257 '/{}' directory created\r\n", tmp);
 
-    sprintf(send_buffer, "257 '/%s' directory created\r\n", directoryName);
-
-    send_message(s, send_buffer)
+    send_message(s, &send_buffer)
 }
 
 // Client sent RMD command, returns false if connection ended.
-fn command_delete_directory(s: &TcpStream, receive_buffer: &str) -> bool {
-    char directoryName[FILENAME_SIZE];
-    memset(&directoryName, 0, FILENAME_SIZE);
+fn command_delete_directory(s: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
+    let mut tmp_vec = Vec::new();
 
-    remove_command(receive_buffer, directoryName);
+    remove_command(receive_buffer, &mut tmp_vec, 4);
 
-    replace_backslash(directoryName);
+    replace_backslash(&mut tmp_vec);
 
-    char bufferForNewName[FILENAME_SIZE];
-    memset(&bufferForNewName, 0, FILENAME_SIZE);
+    let tmp = String::from_utf8_lossy(&tmp_vec[0..]).to_string();
 
-    if !is_convert_cyrillic() {
-        strcpy(bufferForNewName, directoryName);
-    } else {
-        simple_conv(directoryName, strlen(directoryName), bufferForNewName, FILENAME_SIZE, true);
-    }
-
-    execute_system_command(systemCommandRMDIR, bufferForNewName);
+    execute_system_command(SYSTEM_COMMAND_RMDIR, tmp.as_str());
 
     if is_debug() {
-        std::cout << "<<<DEBUG INFO>>>: " << systemCommandRMDIR << " " << directoryName << std::endl;
+        println!("<<<DEBUG INFO>>>: {} {}", SYSTEM_COMMAND_RMDIR, tmp);
     }
 
     send_message(s, "250 Requested file action okay, completed.\r\n")
 }
-*/
+
 // Client sent TYPE command, returns false if connection ended.
 fn command_type(s: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
     let mut tmp = Vec::new();
