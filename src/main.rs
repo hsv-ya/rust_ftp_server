@@ -17,7 +17,7 @@
 use std::env;
 use std::net::{TcpListener, TcpStream, SocketAddr, ToSocketAddrs};
 use std::io::{self, Write, Read/*, BufRead, BufReader*/};
-use std::{thread, time};
+use std::thread;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::fs::File;
 use std::process::Command;
@@ -256,11 +256,11 @@ fn communicate_with_client(s: &mut TcpStream, connect_to: &mut String, authroise
     else if maybe_command == "LIST" || maybe_command == "NLST" {
         success = command_list(s, connect_to, client_id, current_directory);
     }
-/*
-    else if maybe_command == "RETR" {
-        success = command_retrieve(s, sDataActive, receive_buffer, current_directory);
-    }
 
+    else if maybe_command == "RETR" {
+        success = command_retrieve(s, connect_to, &mut receive_buffer, current_directory);
+    }
+/*
     else if maybe_command == "STOR" {
         success = command_store(s, sDataActive, receive_buffer, current_directory);
     }
@@ -499,14 +499,7 @@ fn send_argument_syntax_error(s: &TcpStream) -> bool {
     send_message(s, "501 Syntax error in arguments.\r\n")
 }
 
-/*fn send_argument_syntax_error(s: &std::net::TcpStream) -> io::Result<(String, String)> {
-    let message_error = "Argument syntax error";
-    if is_debug() {
-        writeln!(s, message_error).unwrap();
-    }
-    Err(io::Error::new(io::ErrorKind::InvalidInput, message_error))
-}
-
+/*
 // Gets the servers address information based on arguments.
 fn get_client_address_info_active(s: &TcpStream, ip_buffer: &str, port_buffer: &str) -> Result<SocketAddr, String> {
     let hints = libc::addrinfo {
@@ -627,7 +620,6 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
         tmp_dir_files += " >";
         tmp_dir_files += &tmp_file;
 
-        // Save directory information in temp file.
         if is_debug() {
             println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_files, current_directory);
         }
@@ -639,9 +631,6 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
         }
 
         execute_system_command(tmp_dir_directory.as_str(), current_directory);
-
-        let one_second = time::Duration::from_secs(1);
-        thread::sleep(one_second);
 
         let mut f_in_dir = File::create(tmp.as_str())?;
 
@@ -663,7 +652,7 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
                 } else {
                     let mut tmp_new_file_name: Vec<u8> = Vec::new();
                     simple_conv(buffer.clone(), &mut tmp_new_file_name, false);
-                    let str_tmp_new_file_name = String::from_utf8_lossy(&tmp_new_file_name[0..]);//.to_string().as_str();
+                    let str_tmp_new_file_name = String::from_utf8_lossy(&tmp_new_file_name[0..]);
                     tmp_buffer_dir += &str_tmp_new_file_name;
                 }
                 if !is_first {
@@ -765,64 +754,74 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
         }
 
         file_name_for_open += file_name;
-
-        //if !is_convert_cyrillic() {
-        //    f_in = fopen(fileNameFull, "rb");
-        //} else {
-        //    char tmp_new_file_name[FILENAME_SIZE];
-        //    simple_conv(fileNameFull, strlen(fileNameFull), tmp_new_file_name, FILENAME_SIZE, true);
-        //    f_in = fopen(tmp_new_file_name, "rb");
-        //}
     }
 
-    let mut f_in = File::open(file_name_for_open.as_str())?;
+    let result = File::open(file_name_for_open.as_str());
+    let mut f_in;
 
-    /*if f_in == NULL {
-        std::cout << "The file: \"" << fileName << "\" does not exist." << std::endl;
+    match result {
+        Err(_) => {
+            println!("The file: \"{}\" does not exist.", file_name_for_open);
 
-        sprintf(send_buffer, "550 File name invalid.\r\n");
-        int bytes = send(s, send_buffer, strlen(send_buffer), 0);
+            if !send_message(s, "550 File name invalid.\r\n") {
+                return Ok(0);
+            }
 
-        if is_debug() {
-            std::cout << "---> " << send_buffer;
+            return Ok(-1);
+        },
+        Ok(f) => {
+            f_in = f;
+            if !send_message(s, "150 Data connection ready.\r\n") {
+                if client_id > 0 {
+                    if !is_debug() {
+                        execute_system_command(SYSTEM_COMMAND_DEL, tmp.as_str());
+                        execute_system_command(SYSTEM_COMMAND_DEL, tmp_directory.as_str());
+                        execute_system_command(SYSTEM_COMMAND_DEL, tmp_file.as_str());
+                    }
+                }
+
+                return Ok(0);
+            }
         }
+    }
 
-        if bytes < 0 {
-            return 0;
-        }
+    let mut temp_buffer = [0; BIG_BUFFER_SIZE];
+    let mut send_to;
 
-        return -1;
-    } else {*/
-        if !send_message(s, "150 Data connection ready.\r\n") {
+    match TcpStream::connect(connect_to.as_str()) {
+        Ok(stream) => send_to = stream,
+        Err(_) => {
             if client_id > 0 {
                 if !is_debug() {
                     execute_system_command(SYSTEM_COMMAND_DEL, tmp.as_str());
                     execute_system_command(SYSTEM_COMMAND_DEL, tmp_directory.as_str());
                     execute_system_command(SYSTEM_COMMAND_DEL, tmp_file.as_str());
-                }    
+                }
             }
-
             return Ok(0);
         }
-    //}
-
-    let mut temp_buffer = [0; BIG_BUFFER_SIZE];
-    let mut send_to;
-
-    send_to = TcpStream::connect(connect_to.as_str()).unwrap();
+    }
 
     loop {
-        let result = f_in.read(&mut temp_buffer[..])?;
+        let result = f_in.read(&mut temp_buffer[..]);
 
-        if result == 0 {
+        let read_bytes;
+
+        match result {
+            Ok(n) => read_bytes = n,
+            Err(_) => read_bytes = 0
+        }
+
+        if read_bytes == 0 {
             break;
         }
 
-        let bytes = match send_to.write_all(&temp_buffer[..result]) {
-            Ok(()) => result,
+        let bytes = match send_to.write_all(&temp_buffer[..read_bytes]) {
+            Ok(()) => read_bytes,
             Err(_) => 0,
         };
-        if bytes != result {
+
+        if bytes != read_bytes {
             if client_id > 0 {
                 if !is_debug() {
                     execute_system_command(SYSTEM_COMMAND_DEL, tmp.as_str());
@@ -885,26 +884,25 @@ fn execute_system_command(command_name_with_keys: &str, file_name: &str) -> i32 
         None => -1
     }
 }
-/*
+
 // Client sent RETR command, returns false if fails.
-fn command_retrieve(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &str, current_directory: &str) -> bool {
-    char fileName[FILENAME_SIZE];
-    memset(&fileName, 0, FILENAME_SIZE);
+fn command_retrieve(s: &TcpStream, connect_to: &mut String, receive_buffer: &mut Vec<u8>, current_directory: &mut String) -> bool {
+    let mut tmp_vec = Vec::new();
 
-    remove_command(receive_buffer, fileName);
+    remove_command(receive_buffer, &mut tmp_vec, 4);
 
-    bool success = sendFile(s, sDataActive, fileName, 0, current_directory);
-    if !success {
-        closesocket(sDataActive);
+    let tmp = String::from_utf8_lossy(&tmp_vec).to_string();
 
-        return success;
-    }
+    let result = send_file(s, connect_to, tmp.as_str(), 0, current_directory.as_str());
 
-    closesocket(sDataActive);
+    match result {
+        Ok(_) => {},
+        Err(_) => return false
+    };
 
     send_message(s, "226 File transfer complete.\r\n")
 }
-
+/*
 // Client sent STORE command, returns false if fails.
 fn command_store(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &str, current_directory: &str) -> bool {
     char fileName[FILENAME_SIZE];
