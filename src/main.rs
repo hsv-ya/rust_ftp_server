@@ -260,11 +260,11 @@ fn communicate_with_client(s: &mut TcpStream, connect_to: &mut String, authroise
     else if maybe_command == "RETR" {
         success = command_retrieve(s, connect_to, &mut receive_buffer, current_directory);
     }
-/*
+
     else if maybe_command == "STOR" {
-        success = command_store(s, sDataActive, receive_buffer, current_directory);
+        success = command_store(s, connect_to, &mut receive_buffer, current_directory);
     }
-*/
+
     else if maybe_command == "CWD " {
         success = command_change_working_directory(s, &mut receive_buffer, current_directory);
     }
@@ -499,80 +499,10 @@ fn send_argument_syntax_error(s: &TcpStream) -> bool {
     send_message(s, "501 Syntax error in arguments.\r\n")
 }
 
-/*
-// Gets the servers address information based on arguments.
-fn get_client_address_info_active(s: &TcpStream, ip_buffer: &str, port_buffer: &str) -> Result<SocketAddr, String> {
-    let hints = libc::addrinfo {
-        ai_family: libc::AF_INET,
-        ai_socktype: libc::SOCK_STREAM,
-        ai_protocol: 0,
-        ai_flags: 0,
-        ai_canonname: ptr::null_mut(),
-        ai_addr: ptr::null_mut(),
-        ai_next: ptr::null_mut(),
-    };
-
-    let mut result: *mut libc::addrinfo = ptr::null_mut();
-    let i_result = unsafe { libc::getaddrinfo(ip_buffer.as_ptr() as *const i8, port_buffer.as_ptr() as *const i8, &hints, &mut result) };
-
-    if i_result != 0 {
-        eprintln!("getaddrinfo() for client failed: {}", i_result);
-        return Err(format!("getaddrinfo failed with error: {}", i_result));
-    }
-
-    if is_debug() {
-        println!("<<<DEBUG INFO>>>: Client address information created.");
-    }
-
-    let addr = unsafe { (*result).ai_addr };
-    let socket_addr = unsafe { *(addr as *const SocketAddr) };
-
-    unsafe { libc::freeaddrinfo(result) };
-
-    Ok(socket_addr)
-}
-
-// Allocates the socket for data transfer..
-fn allocateDataTransferSocket(sDataActive: &TcpStream, result: &addrinfo) -> bool
-{
-    sDataActive = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-
-    if sDataActive == INVALID_SOCKET {
-        std::cout << "Error at socket(): " << WSAGetLastError() << std::endl;
-
-        return false;
-    }
-
-    if is_debug() {
-        std::cout << "<<<DEBUG INFO>>>: Data transfer socket allocated." << std::endl;
-    }
-
-    true
-}
-
-// Bind data transfer socket to result address.
-fn connect_data_transfer_socket(sDataActive: &TcpStream, result: &addrinfo) -> bool {
-    let iResult = connect(sDataActive, result->ai_addr, (int) result->ai_addrlen);
-
-    if iResult == SOCKET_ERROR {
-        std::cout << "Active connection failed with error: " << WSAGetLastError() << std::endl;
-        closesocket(sDataActive);
-
-        return false;
-    }
-
-    if is_debug() {
-        std::cout << "<<<DEBUG INFO>>>: Data transfer socket connected." << std::endl;
-    }
-
-    true
-}
-
 // Sends the client a message to say data connection failed.
 fn send_failed_active_connection(s: &TcpStream) -> bool {
     return send_message(s, "425 Something is wrong, can't start active connection.\r\n");
 }
-*/
 
 // Client sent LIST command, returns false if fails.
 fn command_list(s: &TcpStream, connect_to: &mut String, client_id: u16, current_directory: &mut String) -> bool {
@@ -919,112 +849,74 @@ fn command_retrieve(s: &TcpStream, connect_to: &mut String, receive_buffer: &mut
 
     send_message(s, "226 File transfer complete.\r\n")
 }
-/*
+
 // Client sent STORE command, returns false if fails.
-fn command_store(s: &TcpStream, sDataActive: &TcpStream, receive_buffer: &str, current_directory: &str) -> bool {
-    char fileName[FILENAME_SIZE];
-    memset(&fileName, 0, FILENAME_SIZE);
+fn command_store(s: &TcpStream, connect_to: &mut String, receive_buffer: &mut Vec<u8>, current_directory: &mut String) -> bool {
+    let mut tmp_vec = Vec::new();
 
-    removeCommand(receive_buffer, fileName);
+    remove_command(receive_buffer, &mut tmp_vec, 4);
 
-    bool success = saveFile(s, sDataActive, fileName, current_directory);
-    if !success {
-        closesocket(sDataActive);
+    let tmp = String::from_utf8_lossy(&tmp_vec).to_string();
 
-        return success;
+    let result = save_file(s, connect_to, tmp.as_str(), current_directory.as_str());
+
+    if !result {
+        return result;
     }
-
-    closesocket(sDataActive);
 
     send_message(s, "226 File transfer complete.\r\n")
 }
 
 // Sends specified file to client.
-fn save_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, current_directory: &str) -> bool {
-    std::cout << "Client has requested to store the file: \"" << fileName << "\"." << std::endl;
+fn save_file(s: &TcpStream, connect_to: &mut String, file_name: &str, current_directory: &str) -> bool {
+    println!("Client has requested to store the file: \"{}\".", file_name);
 
-    char send_buffer[BUFFER_SIZE];
-    memset(&send_buffer, 0, BUFFER_SIZE);
+    let mut recv_from;
 
-    sprintf(send_buffer, "150 Data connection ready.\r\n");
-    int bytes = send(s, send_buffer, strlen(send_buffer), 0);
-
-    if is_debug() {
-        std::cout << "---> " << send_buffer;
-    }
-
-    if bytes < 0 {
-        return false;
-    }
-
-    char fileNameFull[FILENAME_SIZE];
-    memset(&fileNameFull, 0, FILENAME_SIZE);
-
-    strcat(fileNameFull, current_directory);
-
-    if strlen(fileNameFull) > 0 {
-        strcat(fileNameFull, "\\");
-    }
-
-    strcat(fileNameFull, fileName);
-
-    std::ofstream fOut;
-
-    if !is_convert_cyrillic() {
-        fOut.open(fileNameFull, std::ofstream::binary);
-    } else {
-        char fileNameFullNorm[FILENAME_SIZE];
-        simple_conv(fileNameFull, strlen(fileNameFull), fileNameFullNorm, FILENAME_SIZE, true);
-        fOut.open(fileNameFullNorm, std::ofstream::binary);
-    }
-
-    char tempBuffer[BIG_BUFFER_SIZE];
-    int sizeBuffer = 0;
-    bool moreFile = true;
-
-    while moreFile {
-        moreFile = receiveFileContents(sDataActive, tempBuffer, sizeBuffer);
-
-        if sizeBuffer > 0 {
-            fOut.write(tempBuffer, sizeBuffer);
+    match TcpStream::connect(connect_to.as_str()) {
+        Ok(stream) => recv_from = stream,
+        Err(_) => {
+            send_failed_active_connection(s);
+            return false;
         }
     }
 
-    fOut.close();
+    if !send_message(s, "150 Data connection ready.\r\n") {
+        return false;
+    }
 
-    std::cout << "File saved successfully."<< std::endl;
+    let mut file_name_full: String = current_directory.to_string();
 
-    true
-}
+    if file_name_full.len() > 0 {
+        file_name_full += "\\";
+    }
 
-// Receives message and saves it in receive buffer, returns false if connection ended.
-fn receive_file_contents(sDataActive: &TcpStream, receive_buffer: &str, sizeBuffer: &i32) -> bool {
-    int i = 0;
-    int bytes = 0;
+    file_name_full += file_name;
 
-    bool fileToRead = true;
+    let result = File::create(file_name_full.as_str());
+    let mut f_out_file;
+    match result {
+        Ok(f) => f_out_file = f,
+        Err(_) => return false
+    }
 
-    while fileToRead && i < BIG_BUFFER_SIZE - 1 {
-        bytes = recv(sDataActive, receive_buffer + i, BIG_BUFFER_SIZE - 1 - i, 0);
+    let mut temp_buffer: Vec<u8> = vec![0; BIG_BUFFER_SIZE];
 
-        if (bytes == SOCKET_ERROR) || (bytes == 0) {
-            fileToRead = false;
+    loop {
+        let recv_bytes = recv_from.read(&mut temp_buffer[..]).unwrap();
 
+        if recv_bytes > 0 {
+            let _ = f_out_file.write_all(&temp_buffer[..recv_bytes]);
+        } else {
             break;
         }
-
-        i += bytes;
     }
 
-    sizeBuffer = i;
-
-    if (bytes == SOCKET_ERROR) || (bytes == 0) {
-        return false;
-    }
+    println!("File saved successfully.");
 
     true
 }
-*/
+
 // Client sent CWD command, returns false if connection ended.
 fn command_change_working_directory(s: &TcpStream, receive_buffer: &mut Vec<u8>, current_directory: &mut String) -> bool {
     let mut tmp_vec = Vec::new();
