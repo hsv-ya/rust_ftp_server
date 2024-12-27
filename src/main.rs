@@ -16,14 +16,14 @@
 
 use std::env;
 use std::net::{TcpListener, TcpStream, SocketAddr, ToSocketAddrs};
-use std::io::{self, Write, Read, BufRead, BufReader};
+use std::io::{self, Write, Read/*, BufRead, BufReader*/};
 use std::{thread, time};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::fs::File;
 use std::process::Command;
 
-use encoding_rs::WINDOWS_1251;
-use encoding_rs_io::DecodeReaderBytesBuilder;
+//use encoding_rs::WINDOWS_1251;
+//use encoding_rs_io::DecodeReaderBytesBuilder;
 
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
@@ -36,7 +36,7 @@ const SYSTEM_COMMAND_DEL: &str = "del";
 //const SYSTEM_COMMAND_RENAME: &str = "rename";
 
 static SHOW_DEBUG_MESSAGE: AtomicBool = AtomicBool::new(false);
-static mut CONVERT_KIRILLICA: bool = false;
+static mut CONVERT_CYRILLIC: bool = false;
 
 const DEFAULT_PORT: &str = "21";
 //const BUFFER_SIZE: usize = 1024;
@@ -48,14 +48,14 @@ const BIG_BUFFER_SIZE: usize = 65535;
 //      0:  Program name
 //      1:  Port number
 //      2:  Debug mode (true/false)
-//      3:  Use convert kirillica file and directory name between Android and Windows 7 (true/false)
+//      3:  Use convert cyrillic file and directory name between Android and Windows 7 (true/false)
 fn main() -> std::io::Result<()> {
     let argc = std::env::args().len();
     let argv: Vec<String> = std::env::args().collect();
 
     set_debug(debug_mode(argc, &argv));
 
-    unsafe { CONVERT_KIRILLICA = convert_kirillica(argc, &argv); }
+    set_convert_cyrillic(convert_cyrillic(argc, &argv));
 
     if env::var("TEMP").is_err() {
         if is_debug() {
@@ -104,8 +104,18 @@ fn debug_mode(argc: usize, argv: &[String]) -> bool {
     false
 }
 
-// Returns true if user indicated that convert kirillica should be on.
-fn convert_kirillica(argc: usize, argv: &[String]) -> bool {
+fn set_convert_cyrillic(b: bool) {
+    unsafe { CONVERT_CYRILLIC = b; }
+}
+
+fn is_convert_cyrillic() -> bool {
+    let b: bool;
+    unsafe { b = CONVERT_CYRILLIC; }
+    return b
+}
+
+// Returns true if user indicated that convert cyrillic should be on.
+fn convert_cyrillic(argc: usize, argv: &[String]) -> bool {
     if argc > 3 {
         if argv[3] == "true" {
             return true;
@@ -622,25 +632,34 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
         tmp_dir_files += " >";
         tmp_dir_files += &tmp_file;
 
-        let /* mut */ tmp_new_file_name: String;
+        //let mut tmp_new_file_name: String;
 
-        //if !g_convertKirillica {
+        /*if !is_convert_cyrillic() {
             //strcpy(tmp_new_file_name, current_directory);
             tmp_new_file_name = current_directory.to_string();
-        //} else {
-        //    simple_conv(current_directory, strlen(current_directory), tmp_new_file_name, FILENAME_SIZE, true);
-        //}
+        } else {
+            let mut tmp_new_file_name_vec: Vec<u8> = Vec::new();
+            simple_conv(current_directory.as_bytes().to_vec(), &mut tmp_new_file_name_vec, true);
+            //tmp_new_file_name = String::from_utf8_lossy(&tmp_new_file_name_vec[0..]).to_string();
+            tmp_new_file_name = String::from_utf8_uncheched(&tmp_new_file_name_vec[0..]).to_string();
+            //tmp_new_file_name = tmp_new_file_name_vec.to_str();
+        }*/
+        //tmp_new_file_name = current_directory.to_string();
 
         // Save directory information in temp file.
         if is_debug() {
-            println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_files, tmp_new_file_name);
+            //println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_files, tmp_new_file_name);
+            println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_files, current_directory);
         }
-        execute_system_command(tmp_dir_files.as_str(), tmp_new_file_name.as_str());
+        //execute_system_command(tmp_dir_files.as_str(), tmp_new_file_name.as_str());
+        execute_system_command(tmp_dir_files.as_str(), current_directory);
 
         if is_debug() {
-            println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_directory, tmp_new_file_name);
+            //println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_directory, tmp_new_file_name);
+            println!("<<<DEBUG INFO>>>: {} {}", tmp_dir_directory, current_directory);
         }
-        execute_system_command(tmp_dir_directory.as_str(), tmp_new_file_name.as_str());
+        //execute_system_command(tmp_dir_directory.as_str(), tmp_new_file_name.as_str());
+        execute_system_command(tmp_dir_directory.as_str(), current_directory);
 
         let one_second = time::Duration::from_secs(1);
         thread::sleep(one_second);
@@ -651,30 +670,44 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
 
         let mut is_first = true;
 
-        let reader_directory = BufReader::new(
-            DecodeReaderBytesBuilder::new()
-                .encoding(Some(WINDOWS_1251))
-                .build(f_in_directory));
-
-        for line in reader_directory.lines() {
-            let line = line?;
-            let mut tmp_buffer_dir: String = "drw-rw-rw-    1 user       group        512 Oct 15  2024 ".to_string();
-            //if !g_convertKirillica {
-                //strcat(tmp_buffer_dir, tmpBuffer);
-                tmp_buffer_dir += &line;
-            //} else {
-            //    char tmp_new_file_name[FILENAME_SIZE];
-            //    simple_conv(tmpBuffer, strlen(tmpBuffer), tmp_new_file_name, FILENAME_SIZE, false);
-            //    strcat(tmp_buffer_dir, tmp_new_file_name);
-            //}
-            if !is_first {
-                let _ = f_in_dir.write_all("\n".as_bytes());
+        //for line in reader_directory.lines() {
+        let mut buffer: Vec<u8> = Vec::new();
+        //let mut cursor = io::Cursor::new(f_in_directory);
+        //while reader_directory.read_until(0x0A as u8, &mut buffer).unwrap() > 0 {
+        for iter in f_in_directory.bytes() {
+            let byte = iter.unwrap();
+            if byte == b'\r' {
+                continue;
+            } else if byte == b'\n' {
+                //let line = line?;
+                let mut tmp_buffer_dir: String = "drw-rw-rw-    1 user       group        512 Oct 15  2024 ".to_string();
+                if !is_convert_cyrillic() {
+                    //strcat(tmp_buffer_dir, tmpBuffer);
+                    let line = String::from_utf8_lossy(&buffer[0..]);
+                    tmp_buffer_dir += &line;
+                } else {
+                    //char tmp_new_file_name[FILENAME_SIZE];
+                    //simple_conv(tmpBuffer, strlen(tmpBuffer), tmp_new_file_name, FILENAME_SIZE, false);
+                    let mut tmp_new_file_name: Vec<u8> = Vec::new();
+                    //let from_line = line.as_bytes().to_vec();
+                    //simple_conv(from_line, &mut tmp_new_file_name, false);
+                    simple_conv(buffer.clone(), &mut tmp_new_file_name, false);
+                    //strcat(tmp_buffer_dir, tmp_new_file_name);
+                    let str_tmp_new_file_name = String::from_utf8_lossy(&tmp_new_file_name[0..]);//.to_string().as_str();
+                    tmp_buffer_dir += &str_tmp_new_file_name;
+                }
+                if !is_first {
+                    let _ = f_in_dir.write_all("\n".as_bytes());
+                } else {
+                    is_first = false;
+                }
+                let _ = f_in_dir.write_all(tmp_buffer_dir.as_bytes());
+                if is_debug() {
+                    println!("{}", tmp_buffer_dir);
+                }
+                buffer.clear();
             } else {
-                is_first = false;
-            }
-            let _ = f_in_dir.write_all(tmp_buffer_dir.as_bytes());
-            if is_debug() {
-                println!("{}", tmp_buffer_dir);
+                buffer.push(byte);
             }
         }
 
@@ -685,60 +718,69 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
             Err(e) => panic!("{:?} '{}'", e, tmp_file)
         }
 
-        let reader_files = BufReader::new(
-            DecodeReaderBytesBuilder::new()
-                .encoding(Some(WINDOWS_1251))
-                .build(f_in_files));
-
         let mut skip_lines = 5;
         let mut tmp_file_name: String;
         let mut tmp_buffer_file: String;
 
-        for line in reader_files.lines() {
-            if skip_lines > 0 {
-                skip_lines -= 1;
+        for iter in f_in_files.bytes() {
+            let byte = iter.unwrap();
+            if byte == b'\r' {
                 continue;
-            }
-
-            let line = line.unwrap();
-
-            if is_numerical(line.chars().next().unwrap() as u8) {
-                //sscanf(tmpBuffer, "%2d.%2d.%4d  %2d:%2d %17lu %*s", &iDay, &iMonths, &iYear, &iHour, &iMinute, &ulFileSize);
-
-                let v: Vec<&str> = line.split_whitespace().collect();
-                let tmp_date = v[0];
-
-                let i_day = (tmp_date[0..=1]).to_string().parse::<u8>().unwrap();
-                let i_month = (tmp_date[3..=4]).to_string().parse::<usize>().unwrap();
-                let i_year = (tmp_date[6..=9]).to_string().parse::<u16>().unwrap();
-
-                //let tmp_time = v[1];
-                //let _i_hour = sscanf!(&tmp_time[12..13]).unwrap();
-                //let _i_minute = sscanf!(&tmp_time[15..16]).unwrap();
-
-                let tmp_file_size = v[2];
-                let file_size: usize = tmp_file_size.parse::<usize>().unwrap();
-
-                tmp_file_name = line[36..].to_string();
-
-                tmp_buffer_file = format!("-rw-rw-rw-    1 user       group {:10} {} {:02}  {:04} ", file_size, MONTHS[i_month - 1], i_day, i_year).to_string();
-                //if !g_convertKirillica  {
-                    //strcat(tmp_buffer_file, tmp_file_name);
-                    tmp_buffer_file += &tmp_file_name;
-                //} else {
-                //    char tmp_new_file_name[FILENAME_SIZE];
-                //    simple_conv(tmp_file_name, strlen(tmp_file_name), tmp_new_file_name, FILENAME_SIZE, false);
-                //    strcat(tmp_buffer_file, tmp_new_file_name);
-                //}
-                if !is_first {
-                    let _ = f_in_dir.write_all("\n".as_bytes());
-                } else {
-                    is_first = false;
+            } else if byte == b'\n' {
+                if skip_lines > 0 {
+                    skip_lines -= 1;
+                    buffer.clear();
+                    continue;
                 }
-                let _ = f_in_dir.write_all(tmp_buffer_file.as_bytes());
-                if is_debug() {
-                    println!("{}", tmp_buffer_file);
+
+                //if is_numerical(line.chars().next().unwrap() as u8) {
+                if is_numerical(buffer[0]) {
+                    //sscanf(tmpBuffer, "%2d.%2d.%4d  %2d:%2d %17lu %*s", &iDay, &iMonths, &iYear, &iHour, &iMinute, &ulFileSize);
+                    let line = String::from_utf8_lossy(&buffer[0..36]);
+
+                    let v: Vec<&str> = line.split_whitespace().collect();
+                    let tmp_date = v[0];
+
+                    let i_day = (tmp_date[0..=1]).to_string().parse::<u8>().unwrap();
+                    let i_month = (tmp_date[3..=4]).to_string().parse::<usize>().unwrap();
+                    let i_year = (tmp_date[6..=9]).to_string().parse::<u16>().unwrap();
+
+                    //let tmp_time = v[1];
+                    //let _i_hour = sscanf!(&tmp_time[12..13]).unwrap();
+                    //let _i_minute = sscanf!(&tmp_time[15..16]).unwrap();
+
+                    let tmp_file_size = v[2];
+                    let file_size: usize = tmp_file_size.parse::<usize>().unwrap();
+
+                    //tmp_file_name = line[36..].to_string();
+                    let tmp_file_name_vec: Vec<u8> = (&buffer[36..]).into();
+
+                    tmp_buffer_file = format!("-rw-rw-rw-    1 user       group {:10} {} {:02}  {:04} ", file_size, MONTHS[i_month - 1], i_day, i_year).to_string();
+                    if !is_convert_cyrillic() {
+                        //strcat(tmp_buffer_file, tmp_file_name);
+                        tmp_file_name = line[36..].to_string();
+                        tmp_buffer_file += &tmp_file_name;
+                    } else {
+                        //char tmp_new_file_name[FILENAME_SIZE];
+                        let mut tmp_new_file_name_vec: Vec<u8> = Vec::new();
+                        simple_conv(tmp_file_name_vec, &mut tmp_new_file_name_vec, false);
+                        //strcat(tmp_buffer_file, tmp_new_file_name);
+                        let tmp_new_file_name = String::from_utf8_lossy(&tmp_new_file_name_vec[0..]);
+                        tmp_buffer_file += &tmp_new_file_name;
+                    }
+                    if !is_first {
+                        let _ = f_in_dir.write_all("\n".as_bytes());
+                    } else {
+                        is_first = false;
+                    }
+                    let _ = f_in_dir.write_all(tmp_buffer_file.as_bytes());
+                    if is_debug() {
+                        println!("{}", tmp_buffer_file);
+                    }
                 }
+                buffer.clear();
+            } else {
+                buffer.push(byte);
             }
         }
 
@@ -761,7 +803,7 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
 
         file_name_for_open += file_name;
 
-        //if !g_convertKirillica {
+        //if !is_convert_cyrillic() {
         //    f_in = fopen(fileNameFull, "rb");
         //} else {
         //    char tmp_new_file_name[FILENAME_SIZE];
@@ -950,7 +992,7 @@ fn save_file(s: &TcpStream, sDataActive: &TcpStream, fileName: &str, current_dir
 
     std::ofstream fOut;
 
-    if !g_convertKirillica {
+    if !is_convert_cyrillic() {
         fOut.open(fileNameFull, std::ofstream::binary);
     } else {
         char fileNameFullNorm[FILENAME_SIZE];
@@ -1034,7 +1076,7 @@ fn command_delete(s: &TcpStream, receive_buffer: &str) -> bool {
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
 
-    if !g_convertKirillica {
+    if !is_convert_cyrillic() {
         strcpy(bufferForNewName, fileName);
     } else {
         simple_conv(fileName, strlen(fileName), bufferForNewName, FILENAME_SIZE, true);
@@ -1061,7 +1103,7 @@ fn command_make_directory(s: &TcpStream, receive_buffer: &str, current_directory
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
 
-    if !g_convertKirillica {
+    if !is_convert_cyrillic() {
         strcpy(bufferForNewName, directoryName);
     } else {
         simple_conv(directoryName, strlen(directoryName), bufferForNewName, FILENAME_SIZE, true);
@@ -1093,7 +1135,7 @@ fn command_delete_directory(s: &TcpStream, receive_buffer: &str) -> bool {
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
 
-    if !g_convertKirillica {
+    if !is_convert_cyrillic() {
         strcpy(bufferForNewName, directoryName);
     } else {
         simple_conv(directoryName, strlen(directoryName), bufferForNewName, FILENAME_SIZE, true);
@@ -1178,7 +1220,7 @@ fn command_rename_to(s: &TcpStream, receive_buffer: &str, name_file_for_rename: 
     char bufferForNewName[FILENAME_SIZE];
     memset(&bufferForNewName, 0, FILENAME_SIZE);
 
-    if !g_convertKirillica {
+    if !is_convert_cyrillic() {
         strcpy(bufferForNewName, name_file_for_rename);
     } else {
         simple_conv(name_file_for_rename, strlen(name_file_for_rename), bufferForNewName, FILENAME_SIZE, true);
@@ -1200,7 +1242,7 @@ fn command_rename_to(s: &TcpStream, receive_buffer: &str, name_file_for_rename: 
         pch = strchr(pch, '\\') + 1;
     }
 
-    if !g_convertKirillica {
+    if !is_convert_cyrillic() {
         strcpy(bufferForNewName, pch);
     } else {
         simple_conv(pch, strlen(pch), bufferForNewName, FILENAME_SIZE, true);
@@ -1301,251 +1343,273 @@ fn replace_backslash(buffer: &mut Vec<u8>) {
         i += 1;
     }
 }
-/*
-// Converting kirillic characters between Android and Windows 7
-fn simple_conv(inString: &str, inLen: i32, outString: &str, outMaxLen: i32, tudaSuda: bool) {
-    const ALL_SYMBOLS_FOR_CONVERT = (31 + 31 + 4 + 1);
 
-    static table_for_convert_Tuda: [&str; ALL_SYMBOLS_FOR_CONVERT] = {
+// Converting cyrillic characters between Android and Windows 7
+fn simple_conv(in_string: Vec<u8>, out_string: &mut Vec<u8>, tuda_suda: bool) {
+    const ALL_SYMBOLS_FOR_CONVERT: usize = 31 + 31 + 4 + 1;
+
+    static TABLE_FOR_CONVERT_TUDA: [[u8; 4]; ALL_SYMBOLS_FOR_CONVERT] = [
         // small
-        r#"\xd0\xb9\xE9"#,
-        r#"\xd1\x86\xF6"#,
-        r#"\xd1\x83\xF3"#,
-        r#"\xd0\xba\xEA"#,
-        r#"\xd0\xb5\xE5"#,
-        r#"\xd0\xbd\xED"#,
-        r#"\xd0\xb3\xE3"#,
-        r#"\xd1\x88\xF8"#,
-        r#"\xd1\x89\xF9"#,
-        r#"\xd0\xb7\xE7"#,
-        r#"\xd1\x85\xF5"#,
-        r#"\xd1\x84\xF4"#,
-        r#"\xd1\x8b\xFB"#,
-        r#"\xd0\xb2\xE2"#,
-        r#"\xd0\xb0\xE0"#,
-        r#"\xd0\xbf\xEF"#,
-        r#"\xd1\x80\xF0"#,
-        r#"\xd0\xbe\xEE"#,
-        r#"\xd0\xbb\xEB"#,
-        r#"\xd0\xb4\xE4"#,
-        r#"\xd0\xb6\xE6"#,
-        r#"\xd1\x8d\xFD"#,
-        r#"\xd1\x8f\xFF"#,
-        r#"\xd1\x87\xF7"#,
-        r#"\xd1\x81\xF1"#,
-        r#"\xd0\xbc\xEC"#,
-        r#"\xd0\xb8\xE8"#,
-        r#"\xd1\x82\xF2"#,
-        r#"\xd1\x8c\xFC"#,
-        r#"\xd0\xb1\xE1"#,
-        r#"\xd1\x8e\xFE"#,
+        [0xd0, 0xb9, 0xE9, 0],
+        [0xd1, 0x86, 0xF6, 0],
+        [0xd1, 0x83, 0xF3, 0],
+        [0xd0, 0xba, 0xEA, 0],
+        [0xd0, 0xb5, 0xE5, 0],
+        [0xd0, 0xbd, 0xED, 0],
+        [0xd0, 0xb3, 0xE3, 0],
+        [0xd1, 0x88, 0xF8, 0],
+        [0xd1, 0x89, 0xF9, 0],
+        [0xd0, 0xb7, 0xE7, 0],
+        [0xd1, 0x85, 0xF5, 0],
+        [0xd1, 0x84, 0xF4, 0],
+        [0xd1, 0x8b, 0xFB, 0],
+        [0xd0, 0xb2, 0xE2, 0],
+        [0xd0, 0xb0, 0xE0, 0],
+        [0xd0, 0xbf, 0xEF, 0],
+        [0xd1, 0x80, 0xF0, 0],
+        [0xd0, 0xbe, 0xEE, 0],
+        [0xd0, 0xbb, 0xEB, 0],
+        [0xd0, 0xb4, 0xE4, 0],
+        [0xd0, 0xb6, 0xE6, 0],
+        [0xd1, 0x8d, 0xFD, 0],
+        [0xd1, 0x8f, 0xFF, 0],
+        [0xd1, 0x87, 0xF7, 0],
+        [0xd1, 0x81, 0xF1, 0],
+        [0xd0, 0xbc, 0xEC, 0],
+        [0xd0, 0xb8, 0xE8, 0],
+        [0xd1, 0x82, 0xF2, 0],
+        [0xd1, 0x8c, 0xFC, 0],
+        [0xd0, 0xb1, 0xE1, 0],
+        [0xd1, 0x8e, 0xFE, 0],
         // big
-        r#"\xd0\x99\xC9"#,
-        r#"\xd0\xa6\xD6"#,
-        r#"\xd0\xa3\xD3"#,
-        r#"\xd0\x9a\xCA"#,
-        r#"\xd0\x95\xC5"#,
-        r#"\xd0\x9d\xCD"#,
-        r#"\xd0\x93\xC3"#,
-        r#"\xd0\xa8\xD8"#,
-        r#"\xd0\xa9\xD9"#,
-        r#"\xd0\x97\xC7"#,
-        r#"\xd0\xa5\xD5"#,
-        r#"\xd0\xa4\xD4"#,
-        r#"\xd0\xab\xDB"#,
-        r#"\xd0\x92\xC2"#,
-        r#"\xd0\x90\xC0"#,
-        r#"\xd0\x9f\xCF"#,
-        r#"\xd0\xa0\xD0"#,
-        r#"\xd0\x9e\xCE"#,
-        r#"\xd0\x9b\xCB"#,
-        r#"\xd0\x94\xC4"#,
-        r#"\xd0\x96\xC6"#,
-        r#"\xd0\xad\xDD"#,
-        r#"\xd0\xaf\xDF"#,
-        r#"\xd0\xa7\xD7"#,
-        r#"\xd0\xa1\xD1"#,
-        r#"\xd0\x9c\xCC"#,
-        r#"\xd0\x98\xC8"#,
-        r#"\xd0\xa2\xD2"#,
-        r#"\xd0\xac\xDC"#,
-        r#"\xd0\x91\xC1"#,
-        r#"\xd0\xae\xDE"#,
+        [0xd0, 0x99, 0xC9, 0],
+        [0xd0, 0xa6, 0xD6, 0],
+        [0xd0, 0xa3, 0xD3, 0],
+        [0xd0, 0x9a, 0xCA, 0],
+        [0xd0, 0x95, 0xC5, 0],
+        [0xd0, 0x9d, 0xCD, 0],
+        [0xd0, 0x93, 0xC3, 0],
+        [0xd0, 0xa8, 0xD8, 0],
+        [0xd0, 0xa9, 0xD9, 0],
+        [0xd0, 0x97, 0xC7, 0],
+        [0xd0, 0xa5, 0xD5, 0],
+        [0xd0, 0xa4, 0xD4, 0],
+        [0xd0, 0xab, 0xDB, 0],
+        [0xd0, 0x92, 0xC2, 0],
+        [0xd0, 0x90, 0xC0, 0],
+        [0xd0, 0x9f, 0xCF, 0],
+        [0xd0, 0xa0, 0xD0, 0],
+        [0xd0, 0x9e, 0xCE, 0],
+        [0xd0, 0x9b, 0xCB, 0],
+        [0xd0, 0x94, 0xC4, 0],
+        [0xd0, 0x96, 0xC6, 0],
+        [0xd0, 0xad, 0xDD, 0],
+        [0xd0, 0xaf, 0xDF, 0],
+        [0xd0, 0xa7, 0xD7, 0],
+        [0xd0, 0xa1, 0xD1, 0],
+        [0xd0, 0x9c, 0xCC, 0],
+        [0xd0, 0x98, 0xC8, 0],
+        [0xd0, 0xa2, 0xD2, 0],
+        [0xd0, 0xac, 0xDC, 0],
+        [0xd0, 0x91, 0xC1, 0],
+        [0xd0, 0xae, 0xDE, 0],
 
-        r#"\xd0\xaa\xda"#, // big "b
-        r#"\xd1\x8a\xfa"#, // small "b
-        r#"\xd0\x81\xa8"#, // big :E
-        r#"\xd1\x91\xb8"#, // small :e
+        [0xd0, 0xaa, 0xda, 0], // big "b
+        [0xd1, 0x8a, 0xfa, 0], // small "b
+        [0xd0, 0x81, 0xa8, 0], // big :E
+        [0xd1, 0x91, 0xb8, 0], // small :e
 
-        r#"\xe2\x84\x96\xb9"# // N
-    };
+        [0xe2, 0x84, 0x96, 0xb9] // N
+    ];
 
-    static table_for_convert_Suda: [&str; ALL_SYMBOLS_FOR_CONVERT] = {
+    static TABLE_FOR_CONVERT_SUDA: [[u8; 4]; ALL_SYMBOLS_FOR_CONVERT] = [
         // small
-        r#"\xd0\xb9\xA9"#,
-        r#"\xd1\x86\xE6"#,
-        r#"\xd1\x83\xE3"#,
-        r#"\xd0\xba\xAA"#,
-        r#"\xd0\xb5\xA5"#,
-        r#"\xd0\xbd\xAD"#,
-        r#"\xd0\xb3\xA3"#,
-        r#"\xd1\x88\xE8"#,
-        r#"\xd1\x89\xE9"#,
-        r#"\xd0\xb7\xA7"#,
-        r#"\xd1\x85\xE5"#,
-        r#"\xd1\x84\xE4"#,
-        r#"\xd1\x8b\xEB"#,
-        r#"\xd0\xb2\xA2"#,
-        r#"\xd0\xb0\xA0"#,
-        r#"\xd0\xbf\xAF"#,
-        r#"\xd1\x80\xE0"#,
-        r#"\xd0\xbe\xAE"#,
-        r#"\xd0\xbb\xAB"#,
-        r#"\xd0\xb4\xA4"#,
-        r#"\xd0\xb6\xA6"#,
-        r#"\xd1\x8d\xED"#,
-        r#"\xd1\x8f\xEF"#,
-        r#"\xd1\x87\xE7"#,
-        r#"\xd1\x81\xE1"#,
-        r#"\xd0\xbc\xAC"#,
-        r#"\xd0\xb8\xA8"#,
-        r#"\xd1\x82\xE2"#,
-        r#"\xd1\x8c\xEC"#,
-        r#"\xd0\xb1\xA1"#,
-        r#"\xd1\x8e\xEE"#,
+        [0xd0, 0xb9, 0xA9, 0],
+        [0xd1, 0x86, 0xE6, 0],
+        [0xd1, 0x83, 0xE3, 0],
+        [0xd0, 0xba, 0xAA, 0],
+        [0xd0, 0xb5, 0xA5, 0],
+        [0xd0, 0xbd, 0xAD, 0],
+        [0xd0, 0xb3, 0xA3, 0],
+        [0xd1, 0x88, 0xE8, 0],
+        [0xd1, 0x89, 0xE9, 0],
+        [0xd0, 0xb7, 0xA7, 0],
+        [0xd1, 0x85, 0xE5, 0],
+        [0xd1, 0x84, 0xE4, 0],
+        [0xd1, 0x8b, 0xEB, 0],
+        [0xd0, 0xb2, 0xA2, 0],
+        [0xd0, 0xb0, 0xA0, 0],
+        [0xd0, 0xbf, 0xAF, 0],
+        [0xd1, 0x80, 0xE0, 0],
+        [0xd0, 0xbe, 0xAE, 0],
+        [0xd0, 0xbb, 0xAB, 0],
+        [0xd0, 0xb4, 0xA4, 0],
+        [0xd0, 0xb6, 0xA6, 0],
+        [0xd1, 0x8d, 0xED, 0],
+        [0xd1, 0x8f, 0xEF, 0],
+        [0xd1, 0x87, 0xE7, 0],
+        [0xd1, 0x81, 0xE1, 0],
+        [0xd0, 0xbc, 0xAC, 0],
+        [0xd0, 0xb8, 0xA8, 0],
+        [0xd1, 0x82, 0xE2, 0],
+        [0xd1, 0x8c, 0xEC, 0],
+        [0xd0, 0xb1, 0xA1, 0],
+        [0xd1, 0x8e, 0xEE, 0],
         // big
-        r#"\xd0\x99\x89"#,
-        r#"\xd0\xa6\x96"#,
-        r#"\xd0\xa3\x93"#,
-        r#"\xd0\x9a\x8A"#,
-        r#"\xd0\x95\x85"#,
-        r#"\xd0\x9d\x8D"#,
-        r#"\xd0\x93\x83"#,
-        r#"\xd0\xa8\x98"#,
-        r#"\xd0\xa9\x99"#,
-        r#"\xd0\x97\x87"#,
-        r#"\xd0\xa5\x95"#,
-        r#"\xd0\xa4\x94"#,
-        r#"\xd0\xab\x9B"#,
-        r#"\xd0\x92\x82"#,
-        r#"\xd0\x90\x80"#,
-        r#"\xd0\x9f\x8F"#,
-        r#"\xd0\xa0\x90"#,
-        r#"\xd0\x9e\x8E"#,
-        r#"\xd0\x9b\x8B"#,
-        r#"\xd0\x94\x84"#,
-        r#"\xd0\x96\x86"#,
-        r#"\xd0\xad\x9D"#,
-        r#"\xd0\xaf\x9F"#,
-        r#"\xd0\xa7\x97"#,
-        r#"\xd0\xa1\x91"#,
-        r#"\xd0\x9c\x8C"#,
-        r#"\xd0\x98\x88"#,
-        r#"\xd0\xa2\x92"#,
-        r#"\xd0\xac\x9C"#,
-        r#"\xd0\x91\x81"#,
-        r#"\xd0\xae\x9E"#,
+        [0xd0, 0x99, 0x89, 0],
+        [0xd0, 0xa6, 0x96, 0],
+        [0xd0, 0xa3, 0x93, 0],
+        [0xd0, 0x9a, 0x8A, 0],
+        [0xd0, 0x95, 0x85, 0],
+        [0xd0, 0x9d, 0x8D, 0],
+        [0xd0, 0x93, 0x83, 0],
+        [0xd0, 0xa8, 0x98, 0],
+        [0xd0, 0xa9, 0x99, 0],
+        [0xd0, 0x97, 0x87, 0],
+        [0xd0, 0xa5, 0x95, 0],
+        [0xd0, 0xa4, 0x94, 0],
+        [0xd0, 0xab, 0x9B, 0],
+        [0xd0, 0x92, 0x82, 0],
+        [0xd0, 0x90, 0x80, 0],
+        [0xd0, 0x9f, 0x8F, 0],
+        [0xd0, 0xa0, 0x90, 0],
+        [0xd0, 0x9e, 0x8E, 0],
+        [0xd0, 0x9b, 0x8B, 0],
+        [0xd0, 0x94, 0x84, 0],
+        [0xd0, 0x96, 0x86, 0],
+        [0xd0, 0xad, 0x9D, 0],
+        [0xd0, 0xaf, 0x9F, 0],
+        [0xd0, 0xa7, 0x97, 0],
+        [0xd0, 0xa1, 0x91, 0],
+        [0xd0, 0x9c, 0x8C, 0],
+        [0xd0, 0x98, 0x88, 0],
+        [0xd0, 0xa2, 0x92, 0],
+        [0xd0, 0xac, 0x9C, 0],
+        [0xd0, 0x91, 0x81, 0],
+        [0xd0, 0xae, 0x9E, 0],
 
-        r#"\xd0\xaa\xda"#, // big "b
-        r#"\xd1\x8a\xfa"#, // small "b
-        r#"\xd0\x81\xa8"#, // big :E
-        r#"\xd1\x91\xb8"#, // small :e
+        [0xd0, 0xaa, 0xda, 0], // big "b
+        [0xd1, 0x8a, 0xfa, 0], // small "b
+        [0xd0, 0x81, 0xa8, 0], // big :E
+        [0xd1, 0x91, 0xb8, 0], // small :e
 
-        r#"\xe2\x84\x96\xfc"# // N
-    };
+        [0xe2, 0x84, 0x96, 0xfc] // N
+    ];
 
-    int pos = 0;
+    //let mut pos: usize = 0;
+    let in_len = in_string.len();
 
-    if tudaSuda {
-        for (int i = 0; i < inLen;) {
-            if b'\xd0' == inString[i] || b'\xd1' == inString[i] {
-                bool isFound = false;
+    if is_debug() {
+        for x in &in_string {
+            print!("0x{:x}, ", x);
+        }
+        println!("");
+    }
 
-                for (int q = 0; q < ALL_SYMBOLS_FOR_CONVERT - 1; q++) {
-                    if table_for_convert_Tuda[q][0] == inString[i] && table_for_convert_Tuda[q][1] == inString[i + 1] {
-                        outString[pos] = table_for_convert_Tuda[q][2];
-                        isFound = true;
+    let mut i: usize = 0;
+
+    if tuda_suda {
+        while i < in_len {
+            if b'\xd0' == in_string[i] || b'\xd1' == in_string[i] {
+                let mut is_found = false;
+                let mut q: usize = 0;
+
+                while q < ALL_SYMBOLS_FOR_CONVERT - 1 {
+                    if TABLE_FOR_CONVERT_TUDA[q][0] == in_string[i] && TABLE_FOR_CONVERT_TUDA[q][1] == in_string[i + 1] {
+                        //out_string[pos] = TABLE_FOR_CONVERT_TUDA[q][2];
+                        out_string.push(TABLE_FOR_CONVERT_TUDA[q][2]);
+                        is_found = true;
                         break;
                     }
+
+                    q += 1;
                 }
 
-                if isFound {
-                    pos++;
-                    i++;
+                if is_found {
+                    //pos += 1;
+                    i += 1;
                 }
-            } else if b'\xe2' == inString[i] {
-                bool isFound = false;
+            } else if b'\xe2' == in_string[i] {
+                let mut is_found = false;
+                let mut q = ALL_SYMBOLS_FOR_CONVERT - 1;
 
-                for (int q = ALL_SYMBOLS_FOR_CONVERT - 1; q < ALL_SYMBOLS_FOR_CONVERT; q++) {
-                    if table_for_convert_Tuda[q][0] == inString[i] && table_for_convert_Tuda[q][1] == inString[i + 1] && table_for_convert_Tuda[q][2] == inString[i + 2] {
-                        outString[pos] = table_for_convert_Tuda[q][3];
-                        isFound = true;
+                while q < ALL_SYMBOLS_FOR_CONVERT {
+                    if TABLE_FOR_CONVERT_TUDA[q][0] == in_string[i] && TABLE_FOR_CONVERT_TUDA[q][1] == in_string[i + 1] && TABLE_FOR_CONVERT_TUDA[q][2] == in_string[i + 2] {
+                        //out_string[pos] = TABLE_FOR_CONVERT_TUDA[q][3];
+                        out_string.push(TABLE_FOR_CONVERT_TUDA[q][3]);
+                        is_found = true;
                         break;
                     }
+
+                    q += 1;
                 }
 
-                if isFound {
-                    pos++;
+                if is_found {
+                    //pos += 1;
                     i += 2;
                 }
             } else {
-                outString[pos] = inString[i];
-                pos++;
+                //out_string[pos] = in_string[i];
+                out_string.push(in_string[i]);
+                //pos += 1;
             }
 
-            i++;
-
-            if pos > outMaxLen {
-                outString[outMaxLen - 1] = 0;
-                break;
-            }
+            i += 1;
         }
     } else {
-        for (int i = 0; i < inLen;) {
-            bool isFound = false;
+        while i < in_len {
+            let mut is_found = false;
+            let mut q = 0;
 
-            for (int q = 0; q < ALL_SYMBOLS_FOR_CONVERT - 1; q++) {
-                if table_for_convert_Suda[q][2] == inString[i] {
-                    outString[pos] = table_for_convert_Suda[q][0];
-                    outString[pos + 1] = table_for_convert_Suda[q][1];
-                    isFound = true;
+            while q < ALL_SYMBOLS_FOR_CONVERT - 1 {
+                if TABLE_FOR_CONVERT_SUDA[q][2] == in_string[i] {
+                    //out_string[pos] = TABLE_FOR_CONVERT_SUDA[q][0];
+                    out_string.push(TABLE_FOR_CONVERT_SUDA[q][0]);
+                    //out_string[pos + 1] = TABLE_FOR_CONVERT_SUDA[q][1];
+                    out_string.push(TABLE_FOR_CONVERT_SUDA[q][1]);
+                    is_found = true;
                     break;
                 }
+                q += 1;
             }
 
-            if isFound {
-                pos++;
+            if is_found {
+                //pos += 1;
             } else {
-                bool isFound2 = false;
-                
-                for (int q = ALL_SYMBOLS_FOR_CONVERT - 1; q < ALL_SYMBOLS_FOR_CONVERT; q++) {
-                    if table_for_convert_Suda[q][3] == inString[i] {
-                        outString[pos] = table_for_convert_Suda[q][0];
-                        outString[pos + 1] = table_for_convert_Suda[q][1];
-                        outString[pos + 2] = table_for_convert_Suda[q][2];
-                        isFound2 = true;
+                let mut is_found2 = false;
+                let mut q = ALL_SYMBOLS_FOR_CONVERT - 1;
+
+                while q < ALL_SYMBOLS_FOR_CONVERT {
+                    if TABLE_FOR_CONVERT_SUDA[q][3] == in_string[i] {
+                        //out_string[pos] = TABLE_FOR_CONVERT_SUDA[q][0];
+                        out_string.push(TABLE_FOR_CONVERT_SUDA[q][0]);
+                        //out_string[pos + 1] = TABLE_FOR_CONVERT_SUDA[q][1];
+                        out_string.push(TABLE_FOR_CONVERT_SUDA[q][1]);
+                        //out_string[pos + 2] = TABLE_FOR_CONVERT_SUDA[q][2];
+                        out_string.push(TABLE_FOR_CONVERT_SUDA[q][2]);
+                        is_found2 = true;
                         break;
                     }
+                    q += 1;
                 }
 
-                if isFound2 {
-                    pos += 2;
+                if is_found2 {
+                    //pos += 2;
                 } else {
-                    outString[pos] = inString[i];
+                    //out_string[pos] = in_string[i];
+                    out_string.push(in_string[i]);
                 }
             }
 
-            pos++;
-            i++;
-
-            if pos > outMaxLen {
-                outString[outMaxLen - 1] = 0;
-                break;
-            }
+            //pos += 1;
+            i += 1;
         }
     }
-    if pos < outMaxLen {
-        outString[pos] = 0;
+
+    if is_debug() {
+        for x in out_string {
+            print!("0x{:x}, ", x);
+        }
+        println!("");
     }
 }
-*/
