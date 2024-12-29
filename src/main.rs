@@ -14,6 +14,7 @@
  * redirection and a temporary file.
 */
 
+
 use std::env;
 use std::net::{TcpListener, TcpStream, SocketAddr, ToSocketAddrs};
 use std::io::{self, Write, Read};
@@ -21,6 +22,9 @@ use std::thread;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::fs::File;
 use std::process::Command;
+use chrono::{Utc, Datelike, NaiveDateTime};
+use filetime::{FileTime, set_file_mtime};
+
 
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
@@ -299,6 +303,10 @@ fn communicate_with_client(s: &mut TcpStream, connect_to: &mut String, authroise
         success = command_rename_to(s, &mut receive_buffer, name_file_or_dir_for_rename);
     }
 
+    else if maybe_command == "MFMT" {
+        success = command_mfmt(s, &mut receive_buffer);
+    }
+
     else {
         success = command_unknown(s);
     }
@@ -536,6 +544,9 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
     if client_id > 0 {
         println!("Client has requested the directory listing.");
 
+        let now = Utc::now();
+        let (_is_common_era, year) = now.year_ce();
+
         let path_temp = get_temp_directory();
 
         tmp = format!("{}\\{}_tmp_dir.txt", path_temp, client_id).to_string();
@@ -628,18 +639,22 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
 
                     let i_day = (tmp_date[0..=1]).to_string().parse::<u8>().unwrap();
                     let i_month = (tmp_date[3..=4]).to_string().parse::<usize>().unwrap();
-                    let i_year = (tmp_date[6..=9]).to_string().parse::<u16>().unwrap();
+                    let i_year = (tmp_date[6..=9]).to_string().parse::<u32>().unwrap();
 
-                    //let tmp_time = v[1];
-                    //let _i_hour = sscanf!(&tmp_time[12..13]).unwrap();
-                    //let _i_minute = sscanf!(&tmp_time[15..16]).unwrap();
+                    let tmp_time = v[1];
+                    let i_hour = (tmp_time[0..=1]).to_string().parse::<u8>().unwrap();
+                    let i_minute = (tmp_time[3..=4]).to_string().parse::<u8>().unwrap();
 
                     let tmp_file_size = v[2];
                     let file_size: usize = tmp_file_size.parse::<usize>().unwrap();
 
                     let tmp_file_name_vec: Vec<u8> = (&buffer[36..]).into();
 
-                    tmp_buffer_file = format!("-rw-rw-rw-    1 user       group {:10} {} {:02}  {:04} ", file_size, MONTHS[i_month - 1], i_day, i_year).to_string();
+                    if year == i_year {
+                        tmp_buffer_file = format!("-rw-rw-rw-    1 user       group {:10} {} {:02} {:02}:{:02} ", file_size, MONTHS[i_month - 1], i_day, i_hour, i_minute).to_string();
+                    } else {
+                        tmp_buffer_file = format!("-rw-rw-rw-    1 user       group {:10} {} {:02}  {:04} ", file_size, MONTHS[i_month - 1], i_day, i_year).to_string();
+                    }
                     if !is_convert_cyrillic() {
                         tmp_file_name = line[36..].to_string();
                         tmp_buffer_file += &tmp_file_name;
@@ -1006,7 +1021,7 @@ fn command_type(s: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
 
 // Client sent FEAT command, returns false if fails.
 fn command_feat(s: &TcpStream) -> bool {
-    send_message(s, "211-Extensions supported\r\n UTF8\r\n211 end\r\n")
+    send_message(s, "211-Extensions supported\r\n UTF8\r\n MFMT\r\n211 end\r\n")
 }
 
 // Client sent OPTS command, returns false if connection ended.
@@ -1066,6 +1081,31 @@ fn command_rename_to(s: &TcpStream, receive_buffer: &mut Vec<u8>, name_file_or_d
     } else {
         return send_message(s, "250 Requested file action okay, file renamed.\r\n");
     }
+}
+
+// Client sent MFMT command, returns false if connection ended.
+fn command_mfmt(s: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
+    let mut tmp_vec = Vec::new();
+
+    remove_command(receive_buffer, &mut tmp_vec, 4);
+
+    let mdya = String::from_utf8_lossy(&tmp_vec[0..]);
+
+    let v: Vec<&str> = mdya.split_whitespace().collect();
+
+    let date_time_mfmt = v[0];
+
+    let date_time_for_file = NaiveDateTime::parse_from_str(date_time_mfmt, "%Y%m%d%H%M%S").unwrap();
+
+    let file_name = String::from_utf8_lossy(&tmp_vec[15..]).to_string();
+
+    let mtime = FileTime::from_unix_time(date_time_for_file.and_utc().timestamp(), 0);
+
+    let _ = set_file_mtime(file_name.clone(), mtime);
+
+    let send_buffer = format!("213 Modify={}; {}\r\n", date_time_mfmt, file_name);
+
+    send_message(s, &send_buffer)
 }
 
 // Client sent unknown command, returns false if fails.
