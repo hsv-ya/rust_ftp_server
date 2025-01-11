@@ -656,7 +656,7 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
                         tmp_buffer_file = format!("-rw-rw-rw-    1 user       group {:10} {} {:02}  {:04} ", file_size, MONTHS[i_month - 1], i_day, i_year).to_string();
                     }
                     if !is_convert_cyrillic() {
-                        tmp_file_name = line[36..].to_string();
+                        tmp_file_name = String::from_utf8_lossy(&buffer[36..]).to_string();
                         tmp_buffer_file += &tmp_file_name;
                     } else {
                         let mut tmp_new_file_name_vec: Vec<u8> = Vec::new();
