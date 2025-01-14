@@ -238,30 +238,29 @@ fn communicate_with_client(s: &mut TcpStream, connect_to: &mut String, authroise
                     break;
                 }
             }
+            success
         }, 
 
-        "PASS" => success = command_password(s, &mut receive_buffer, &mut password, *authroised_login),
-        "SYST" => success = command_system_information(s),
-        "QUIT" => success = command_quit(),
-        "PORT" => success = command_port(s, connect_to, &mut receive_buffer),
-        "LIST" => success = command_list(s, connect_to, client_id, current_directory),
-        "NLST" => success = command_list(s, connect_to, client_id, current_directory),
-        "RETR" => success = command_retrieve(s, connect_to, &mut receive_buffer, current_directory),
-        "STOR" => success = command_store(s, connect_to, &mut receive_buffer, current_directory),
-        "CWD " => success = command_change_working_directory(s, &mut receive_buffer, current_directory),
-        "DELE" => success = command_delete(s, &mut receive_buffer),
-        "MKD " => success = command_make_directory(s, &mut receive_buffer),
-        "RMD " => success = command_delete_directory(s, &mut receive_buffer),
-        "TYPE" => success = command_type(s, &mut receive_buffer),
-        "FEAT" => success = command_feat(s),
-        "OPTS" => success = command_opts(s, &mut receive_buffer),
-        "RNFR" => success = command_rename_from(s, &mut receive_buffer, name_file_or_dir_for_rename),
-        "RNTO" => success = command_rename_to(s, &mut receive_buffer, name_file_or_dir_for_rename),
-        "MFMT" => success = command_mfmt(s, &mut receive_buffer),
-        _ => success = command_unknown(s),
+        "PASS" => command_password(s, &mut receive_buffer, &mut password, *authroised_login),
+        "SYST" => command_system_information(s),
+        "QUIT" => command_quit(),
+        "PORT" => command_port(s, connect_to, &mut receive_buffer),
+        "LIST" => command_list(s, connect_to, client_id, current_directory),
+        "NLST" => command_list(s, connect_to, client_id, current_directory),
+        "RETR" => command_retrieve(s, connect_to, &mut receive_buffer, current_directory),
+        "STOR" => command_store(s, connect_to, &mut receive_buffer, current_directory),
+        "CWD " => command_change_working_directory(s, &mut receive_buffer, current_directory),
+        "DELE" => command_delete(s, &mut receive_buffer),
+        "MKD " => command_make_directory(s, &mut receive_buffer),
+        "RMD " => command_delete_directory(s, &mut receive_buffer),
+        "TYPE" => command_type(s, &mut receive_buffer),
+        "FEAT" => command_feat(s),
+        "OPTS" => command_opts(s, &mut receive_buffer),
+        "RNFR" => command_rename_from(s, &mut receive_buffer, name_file_or_dir_for_rename),
+        "RNTO" => command_rename_to(s, &mut receive_buffer, name_file_or_dir_for_rename),
+        "MFMT" => command_mfmt(s, &mut receive_buffer),
+        _ => command_unknown(s)
     }
-
-    success
 }
 
 // Receives message and saves it in receive buffer, returns false if connection ended.
@@ -457,7 +456,7 @@ fn send_argument_syntax_error(s: &TcpStream) -> bool {
 
 // Sends the client a message to say data connection failed.
 fn send_failed_active_connection(s: &TcpStream) -> bool {
-    return send_message(s, "425 Something is wrong, can't start active connection.\r\n");
+    send_message(s, "425 Something is wrong, can't start active connection.\r\n")
 }
 
 // Client sent LIST command, returns false if fails.
@@ -481,6 +480,12 @@ fn get_temp_directory() -> String {
         Ok(val) => val,
         Err(_) => "".to_string()
     }
+}
+
+fn delete_temp_files(file1: &str, file2: &str, file3: &str) {
+    execute_system_command(SYSTEM_COMMAND_DEL, file1, "");
+    execute_system_command(SYSTEM_COMMAND_DEL, file2, "");
+    execute_system_command(SYSTEM_COMMAND_DEL, file3, "");
 }
 
 // Sends specified file to client.
@@ -667,9 +672,7 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
             if !send_message(s, "150 Data connection ready.\r\n") {
                 if client_id > 0 {
                     if !is_debug() {
-                        execute_system_command(SYSTEM_COMMAND_DEL, tmp.as_str(), "");
-                        execute_system_command(SYSTEM_COMMAND_DEL, tmp_directory.as_str(), "");
-                        execute_system_command(SYSTEM_COMMAND_DEL, tmp_file.as_str(), "");
+                        delete_temp_files(&tmp, &tmp_directory, &tmp_file);
                     }
                 }
 
@@ -686,9 +689,7 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
         Err(_) => {
             if client_id > 0 {
                 if !is_debug() {
-                    execute_system_command(SYSTEM_COMMAND_DEL, tmp.as_str(), "");
-                    execute_system_command(SYSTEM_COMMAND_DEL, tmp_directory.as_str(), "");
-                    execute_system_command(SYSTEM_COMMAND_DEL, tmp_file.as_str(), "");
+                    delete_temp_files(&tmp, &tmp_directory, &tmp_file);
                 }
             }
             return Ok(0);
@@ -717,9 +718,7 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
         if bytes != read_bytes {
             if client_id > 0 {
                 if !is_debug() {
-                    execute_system_command(SYSTEM_COMMAND_DEL, tmp.as_str(), "");
-                    execute_system_command(SYSTEM_COMMAND_DEL, tmp_directory.as_str(), "");
-                    execute_system_command(SYSTEM_COMMAND_DEL, tmp_file.as_str(), "");
+                    delete_temp_files(&tmp, &tmp_directory, &tmp_file);
                 }
             }
             return Ok(0);
@@ -728,9 +727,7 @@ fn send_file(s: &TcpStream, connect_to: &mut String, file_name: &str, client_id:
 
     if client_id > 0 {
         if !is_debug() {
-            execute_system_command(SYSTEM_COMMAND_DEL, tmp.as_str(), "");
-            execute_system_command(SYSTEM_COMMAND_DEL, tmp_directory.as_str(), "");
-            execute_system_command(SYSTEM_COMMAND_DEL, tmp_file.as_str(), "");
+            delete_temp_files(&tmp, &tmp_directory, &tmp_file);
         }
     }
 
@@ -983,9 +980,9 @@ fn command_opts(s: &TcpStream, receive_buffer: &mut Vec<u8>) -> bool {
     let opts_name = String::from_utf8_lossy(&tmp_vec[0..]);
 
     if opts_name == "UTF8 ON" {
-        return send_message(s, "200 UTF8 ON.\r\n");
+        send_message(s, "200 UTF8 ON.\r\n")
     } else {
-        return send_argument_syntax_error(s);
+        send_argument_syntax_error(s)
     }
 }
 
@@ -1027,9 +1024,9 @@ fn command_rename_to(s: &TcpStream, receive_buffer: &mut Vec<u8>, name_file_or_d
     name_file_or_dir_for_rename.clear();
 
     if result != 0 {
-        return send_message(s, "503 Bad sequence of commands.\r\n");
+        send_message(s, "503 Bad sequence of commands.\r\n")
     } else {
-        return send_message(s, "250 Requested file action okay, file renamed.\r\n");
+        send_message(s, "250 Requested file action okay, file renamed.\r\n")
     }
 }
 
@@ -1102,7 +1099,7 @@ fn is_email_address(address: &mut Vec<u8>) -> bool {
         i += 1;
     }
 
-    return at_index != -1 && dot_index != -1 && at_index < dot_index;
+    at_index != -1 && dot_index != -1 && at_index < dot_index
 }
 
 // Returns true if the character is alphabetical.
