@@ -314,11 +314,11 @@ fn command_user_name(s: &TcpStream, receive_buffer: &mut Vec<u8>, user_name: &mu
     if *authroised_login {
         println!("User name valid. Password required.");
 
-        return send_message(s, "331 Authorised login requested, please specify the password.\r\n");
+        send_message(s, "331 Authorised login requested, please specify the password.\r\n")
     } else {
         println!("User name unauthorised. Public access only.");
 
-        return send_message(s, "331 Public login requested, please specify email as password.\r\n");
+        send_message(s, "331 Public login requested, please specify email as password.\r\n")
     }
 }
 
@@ -370,9 +370,9 @@ fn command_password(s: &TcpStream, receive_buffer: &mut Vec<u8>, password: &mut 
 fn is_valid_password(password: &mut Vec<u8>, authroised_login: bool) -> bool {
     if authroised_login {
         let password = String::from_utf8_lossy(&password);
-        return password == "334";
+        password == "334"
     } else {
-        return is_email_address(password);
+        is_email_address(password)
     }
 }
 
@@ -398,10 +398,10 @@ fn command_port(s: &TcpStream, connect_to: &mut String, receive_buffer: &mut Vec
     *connect_to = get_client_ip_and_port(receive_buffer);
 
     if connect_to.len() == 0 {
-        return send_argument_syntax_error(s);
+        send_argument_syntax_error(s)
+    } else {
+        send_message(s, "200 PORT Command successful.\r\n")
     }
-
-    send_message(s, "200 PORT Command successful.\r\n")
 }
 
 // Gets the client's IP and port number for active connection.
