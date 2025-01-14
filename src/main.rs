@@ -217,98 +217,48 @@ fn communicate_with_client(s: &mut TcpStream, connect_to: &mut String, authroise
 
     let mut success;
 
-    let maybe_command = String::from_utf8_lossy(&receive_buffer[..4]);
+    let maybe_command: &str = &String::from_utf8_lossy(&receive_buffer[..4]).to_string();
 
-    if maybe_command == "USER" {
-        let mut i_attempts = 0;
+    match maybe_command {
+        "USER" => {
+            let mut i_attempts = 0;
 
-        loop {
-            success = command_user_name(s, &mut receive_buffer, &mut user_name, authroised_login);
+            loop {
+                success = command_user_name(s, &mut receive_buffer, &mut user_name, authroised_login);
 
-            if !success {
-                i_attempts += 1;
+                if !success {
+                    i_attempts += 1;
 
-                receipt_successful = receive_message(s, &mut receive_buffer);
-                if !receipt_successful {
-                    return receipt_successful;
+                    receipt_successful = receive_message(s, &mut receive_buffer);
+                    if !receipt_successful {
+                        return receipt_successful;
+                    }
+                }
+                if success || i_attempts >= 3 {
+                    break;
                 }
             }
-            if success || i_attempts >= 3 {
-                break;
-            }
-        }
-    }
+        }, 
 
-    else if maybe_command == "PASS" {
-        success = command_password(s, &mut receive_buffer, &mut password, *authroised_login);
-    }
-
-    else if maybe_command == "SYST" {
-        success = command_system_information(s);
-    }
-
-    else if maybe_command == "QUIT" {
-        success = command_quit();
-    }
-
-    else if maybe_command == "PORT" {
-        success = command_port(s, connect_to, &mut receive_buffer);
-    }
-
-    else if maybe_command == "LIST" || maybe_command == "NLST" {
-        success = command_list(s, connect_to, client_id, current_directory);
-    }
-
-    else if maybe_command == "RETR" {
-        success = command_retrieve(s, connect_to, &mut receive_buffer, current_directory);
-    }
-
-    else if maybe_command == "STOR" {
-        success = command_store(s, connect_to, &mut receive_buffer, current_directory);
-    }
-
-    else if maybe_command == "CWD " {
-        success = command_change_working_directory(s, &mut receive_buffer, current_directory);
-    }
-
-    else if maybe_command == "DELE" {
-        success = command_delete(s, &mut receive_buffer);
-    }
-
-    else if maybe_command == "MKD " {
-        success = command_make_directory(s, &mut receive_buffer);
-    }
-
-    else if maybe_command == "RMD " {
-        success = command_delete_directory(s, &mut receive_buffer);
-    }
-
-    else if maybe_command == "TYPE" {
-        success = command_type(s, &mut receive_buffer);
-    }
-
-    else if maybe_command == "FEAT" {
-        success = command_feat(s);
-    }
-
-    else if maybe_command == "OPTS" {
-        success = command_opts(s, &mut receive_buffer);
-    }
-
-    else if maybe_command == "RNFR" {
-        success = command_rename_from(s, &mut receive_buffer, name_file_or_dir_for_rename);
-    }
-
-    else if maybe_command == "RNTO" {
-        success = command_rename_to(s, &mut receive_buffer, name_file_or_dir_for_rename);
-    }
-
-    else if maybe_command == "MFMT" {
-        success = command_mfmt(s, &mut receive_buffer);
-    }
-
-    else {
-        success = command_unknown(s);
+        "PASS" => success = command_password(s, &mut receive_buffer, &mut password, *authroised_login),
+        "SYST" => success = command_system_information(s),
+        "QUIT" => success = command_quit(),
+        "PORT" => success = command_port(s, connect_to, &mut receive_buffer),
+        "LIST" => success = command_list(s, connect_to, client_id, current_directory),
+        "NLST" => success = command_list(s, connect_to, client_id, current_directory),
+        "RETR" => success = command_retrieve(s, connect_to, &mut receive_buffer, current_directory),
+        "STOR" => success = command_store(s, connect_to, &mut receive_buffer, current_directory),
+        "CWD " => success = command_change_working_directory(s, &mut receive_buffer, current_directory),
+        "DELE" => success = command_delete(s, &mut receive_buffer),
+        "MKD " => success = command_make_directory(s, &mut receive_buffer),
+        "RMD " => success = command_delete_directory(s, &mut receive_buffer),
+        "TYPE" => success = command_type(s, &mut receive_buffer),
+        "FEAT" => success = command_feat(s),
+        "OPTS" => success = command_opts(s, &mut receive_buffer),
+        "RNFR" => success = command_rename_from(s, &mut receive_buffer, name_file_or_dir_for_rename),
+        "RNTO" => success = command_rename_to(s, &mut receive_buffer, name_file_or_dir_for_rename),
+        "MFMT" => success = command_mfmt(s, &mut receive_buffer),
+        _ => success = command_unknown(s),
     }
 
     success
